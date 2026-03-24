@@ -4,6 +4,8 @@ from pydantic import BaseModel
 import requests
 import yaml
 import os
+import json
+import base64
 from kubernetes import client, config
 
 app = FastAPI()
@@ -18,66 +20,120 @@ app.add_middleware(
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:1b")
 
-SYSTEM_PROMPT = """You are a Kubernetes expert. Generate only valid Kubernetes YAML manifests.
-
-STRICT RULES:
-- Never include explanations or markdown backticks
-- Always separate multiple resources with ---
-- Output raw YAML only
-
-CRITICAL FIELD RULES:
-- Deployments MUST use apiVersion: apps/v1
-- Services MUST use apiVersion: v1
-- Service ports MUST use 'port' not 'number'
-- ConfigMaps MUST use apiVersion: v1
-- Secrets MUST use apiVersion: v1
-- HPA MUST use apiVersion: autoscaling/v2
-
-DEPLOYMENT TEMPLATE TO FOLLOW:
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: <name>
-spec:
-  replicas: <n>
-  selector:
-    matchLabels:
-      app: <name>
-  template:
-    metadata:
-      labels:
-        app: <name>
-    spec:
-      containers:
-      - name: <name>
-        image: <image>
-        ports:
-        - containerPort: <port>
-
-SERVICE TEMPLATE TO FOLLOW:
-apiVersion: v1
-kind: Service
-metadata:
-  name: <name>
-spec:
-  selector:
-    app: <name>
-  ports:
-  - port: <port>
-    targetPort: <port>
-  type: ClusterIP"""
-
+# Load Kubernetes config
 try:
     config.load_incluster_config()
 except:
     config.load_kube_config()
 
-class DeployRequest(BaseModel):
-    request: str
+# ── Templates ──────────────────────────────────────────
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+def generate_deployment_yaml(name, image, replicas=1, port=80):
+    return {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": name},
+        "spec": {
+            "replicas": replicas,
+            "selector": {"matchLabels": {"app": name}},
+            "template": {
+                "metadata": {"labels": {"app": name}},
+                "spec": {
+                    "containers": [{
+                        "name": name,
+                        "image": image,
+                        "ports": [{"containerPort": port}]
+                    }]
+                }
+            }
+        }
+    }
+
+def generate_service_yaml(name, port=80, service_type="NodePort"):
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {"name": f"{name}-service"},
+        "spec": {
+            "selector": {"app": name},
+            "ports": [{"port": port, "targetPort": port}],
+            "type": service_type
+        }
+    }
+
+def generate_hpa_yaml(name, cpu_threshold=70):
+    return {
+        "apiVersion": "autoscaling/v2",
+        "kind": "HorizontalPodAutoscaler",
+        "metadata": {"name": f"{name}-hpa"},
+        "spec": {
+            "scaleTargetRef": {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "name": name
+            },
+            "minReplicas": 1,
+            "maxReplicas": 10,
+            "metrics": [{
+                "type": "Resource",
+                "resource": {
+                    "name": "cpu",
+                    "target": {
+                        "type": "Utilization",
+                        "averageUtilization": cpu_threshold
+                    }
+                }
+            }]
+        }
+    }
+
+def generate_secret_yaml(name, data):
+    encoded = {k: base64.b64encode(v.encode()).decode() for k, v in data.items()}
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": f"{name}-secret"},
+        "type": "Opaque",
+        "data": encoded
+    }
+
+def generate_postgres_deployment_yaml():
+    return {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": "postgres"},
+        "spec": {
+            "replicas": 1,
+            "selector": {"matchLabels": {"app": "postgres"}},
+            "template": {
+                "metadata": {"labels": {"app": "postgres"}},
+                "spec": {
+                    "containers": [{
+                        "name": "postgres",
+                        "image": "postgres:latest",
+                        "ports": [{"containerPort": 5432}],
+                        "env": [
+                            {
+                                "name": "POSTGRES_PASSWORD",
+                                "valueFrom": {
+                                    "secretKeyRef": {
+                                        "name": "postgres-secret",
+                                        "key": "password"
+                                    }
+                                }
+                            },
+                            {
+                                "name": "POSTGRES_DB",
+                                "value": "appdb"
+                            }
+                        ]
+                    }]
+                }
+            }
+        }
+    }
+
+# ── Apply manifest to cluster ──────────────────────────
 
 def apply_manifest(manifest):
     kind = manifest.get("kind")
@@ -111,81 +167,105 @@ def apply_manifest(manifest):
     except Exception as e:
         return {"kind": kind, "name": name, "status": f"error: {str(e)}"}
 
+# ── Routes ─────────────────────────────────────────────
+
+class DeployRequest(BaseModel):
+    request: str
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 @app.post("/deploy")
 def deploy(body: DeployRequest):
-    # Step 1 - Generate YAML from Ollama
+    # Step 1 - Use Ollama to extract intent as JSON
+    intent_prompt = f"""I need you to fill in a JSON template based on a user request.
+
+User request: "{body.request}"
+
+Here is an example:
+User request: "deploy nginx with 3 replicas"
+Output:
+{{"app_name": "nginx", "image": "nginx:latest", "replicas": 3, "port": 80, "needs_database": false, "database_type": "", "cpu_threshold": 70, "needs_hpa": false}}
+
+Another example:
+User request: "deploy my app using myuser/myapp:v1 with postgres database and autoscale at 60 percent"
+Output:
+{{"app_name": "myapp", "image": "myuser/myapp:v1", "replicas": 1, "port": 80, "needs_database": true, "database_type": "postgres", "cpu_threshold": 60, "needs_hpa": true}}
+
+Now fill in the JSON for this request: "{body.request}"
+Output JSON only, nothing else:"""
+
     response = requests.post(
         f"{OLLAMA_HOST}/api/generate",
         json={
             "model": OLLAMA_MODEL,
-            "system": SYSTEM_PROMPT,
-            "prompt": body.request,
+            "system": "You are a JSON extraction expert. Always respond with valid JSON only. No explanations. No markdown. No extra text.",
+            "prompt": intent_prompt,
             "stream": False
         }
     )
-    yaml_output = response.json()["response"]
 
-    # Step 2 - Strip markdown backticks
-    yaml_output = yaml_output.strip()
-    if yaml_output.startswith("```"):
-        yaml_output = "\n".join(yaml_output.split("\n")[1:])
-    if yaml_output.endswith("```"):
-        yaml_output = "\n".join(yaml_output.split("\n")[:-1])
-    yaml_output = yaml_output.strip()
+    raw = response.json()["response"].strip()
 
-    # Step 3 - Parse YAML
+    # Strip markdown if present
+    if raw.startswith("```"):
+        raw = "\n".join(raw.split("\n")[1:])
+    if raw.endswith("```"):
+        raw = "\n".join(raw.split("\n")[:-1])
+    raw = raw.strip()
+
+    # Step 2 - Parse intent
     try:
-        manifests = list(yaml.safe_load_all(yaml_output))
-    except yaml.YAMLError as e:
-        return {"error": f"Invalid YAML generated: {str(e)}", "yaml": yaml_output}
+        intent = json.loads(raw)
+    except:
+        return {"error": "Could not understand the request. Please try again.", "raw": raw}
 
-    # Step 4 - Apply with retry
+    app_name = intent.get("app_name", "myapp")
+    image = intent.get("image", "nginx:latest")
+    replicas = int(intent.get("replicas", 1))
+    port = int(intent.get("port", 80))
+    database_type = intent.get("database_type", "")
+    cpu_threshold = int(intent.get("cpu_threshold", 70))
+
+   # Fix inconsistencies from LLM
+    needs_database = intent.get("needs_database", False) or (database_type in ["postgres", "mysql", "redis"])
+    needs_hpa = intent.get("needs_hpa", False) or any(word in body.request.lower() for word in ["autoscale", "hpa", "auto scale", "scaling", "scale"])
+
+    # Step 3 - Build manifests from templates
+    manifests = []
+    manifests.append(generate_deployment_yaml(app_name, image, replicas, port))
+    manifests.append(generate_service_yaml(app_name, port))
+
+    if needs_hpa:
+        manifests.append(generate_hpa_yaml(app_name, cpu_threshold))
+
+    if needs_database:
+        if database_type == "postgres":
+            manifests.append(generate_secret_yaml("postgres", {
+                "password": "postgres123",
+                "database-url": "postgresql://postgres:postgres123@postgres-service:5432/appdb"
+            }))
+            manifests.append(generate_postgres_deployment_yaml())
+            manifests.append(generate_service_yaml("postgres", 5432, "ClusterIP"))
+        elif database_type == "redis":
+            manifests.append(generate_deployment_yaml("redis", "redis:latest", 1, 6379))
+            manifests.append(generate_service_yaml("redis", 6379, "ClusterIP"))
+        elif database_type == "mysql":
+            manifests.append(generate_secret_yaml("mysql", {
+                "password": "mysql123"
+            }))
+            manifests.append(generate_deployment_yaml("mysql", "mysql:latest", 1, 3306))
+            manifests.append(generate_service_yaml("mysql", 3306, "ClusterIP"))
+
+    # Step 4 - Apply all manifests
     results = []
     for manifest in manifests:
-        if not manifest:
-            continue
-
         result = apply_manifest(manifest)
-
-        # If error, ask Ollama to fix it
-        if "error" in result["status"]:
-            error_msg = result["status"]
-            fix_prompt = f"""This Kubernetes YAML failed to apply:
-
-{yaml.dump(manifest)}
-
-Error: {error_msg}
-
-Fix the YAML and return only the corrected valid YAML. No explanations."""
-
-            fix_response = requests.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "system": SYSTEM_PROMPT,
-                    "prompt": fix_prompt,
-                    "stream": False
-                }
-            )
-            fixed_yaml = fix_response.json()["response"].strip()
-            if fixed_yaml.startswith("```"):
-                fixed_yaml = "\n".join(fixed_yaml.split("\n")[1:])
-            if fixed_yaml.endswith("```"):
-                fixed_yaml = "\n".join(fixed_yaml.split("\n")[:-1])
-            fixed_yaml = fixed_yaml.strip()
-
-            try:
-                fixed_manifest = yaml.safe_load(fixed_yaml)
-                result = apply_manifest(fixed_manifest)
-                result["auto_fixed"] = True
-            except Exception as e:
-                result["fix_attempted"] = True
-                result["fix_error"] = str(e)
-
         results.append(result)
 
     return {
         "status": "success",
-        "yaml": yaml_output,
+        "intent": intent,
         "deployed": results
     }
