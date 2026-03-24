@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KubeNexus</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0f1117;
+      color: #e2e8f0;
+      font-family: 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    .header h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #6366f1, #06b6d4);
+    -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header p {
+      color: #94a3b8;
+      margin-top: 8px;
+      font-size: 1rem;
+    }
+
+    .card {
+      background: #1e2130;
+      border: 1px solid #2d3148;
+      border-radius: 16px;
+      padding: 32px;
+      width: 100%;
+      max-width: 800px;
+      margin-bottom: 24px;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    textarea {
+      flex: 1;
+      background: #0f1117;
+      border: 1px solid #2d3148;
+      border-radius: 10px;
+      color: #e2e8f0;
+      padding: 14px;
+      font-size: 1rem;
+      resize: none;
+      height: 80px;
+      outline: none;
+    }
+
+    textarea:focus {
+      border-color: #6366f1;
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .btn-deploy {
+      background: linear-gradient(135deg, #6366f1, #06b6d4);
+      color: white;
+    }
+
+    .btn-deploy:hover { opacity: 0.9; }
+
+    .btn-mic {
+      background: #1e2130;
+      border: 1px solid #2d3148;
+      color: #e2e8f0;
+      font-size: 1.4rem;
+      padding: 12px 16px;
+      border-radius: 10px;
+    }
+
+    .btn-mic.listening {
+      background: #ef4444;
+      border-color: #ef4444;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .section-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #6366f1;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 16px;
+    }
+
+    .status-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: #0f1117;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+
+    .status-item.created { border-left: 3px solid #22c55e; }
+    .status-item.error { border-left: 3px solid #ef4444; }
+    .status-item.loading { border-left: 3px solid #f59e0b; }
+
+    .yaml-box {
+      background: #0f1117;
+      border-radius: 10px;
+      padding: 16px;
+      font-family: monospace;
+      font-size: 0.82rem;
+      color: #94a3b8;
+      white-space: pre-wrap;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .url-box {
+      background: #0f1117;
+      border: 1px solid #22c55e;
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .url-box h3 {
+      color: #22c55e;
+      font-size: 1.2rem;
+      margin-bottom: 10px;
+    }
+
+    .url-box a {
+      color: #06b6d4;
+      font-size: 1.1rem;
+      text-decoration: none;
+    }
+
+    .url-box a:hover { text-decoration: underline; }
+
+    .hidden { display: none; }
+
+    .loader {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #94a3b8;
+      font-size: 0.9rem;
+    }
+
+    .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid #2d3148;
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>⚡ KubeNexus</h1>
+    <p>Voice & Text driven Natural Language Kubernetes Automation</p>
+  </div>
+
+  <!-- Input Card -->
+  <div class="card">
+    <div class="section-title">What do you want to deploy?</div>
+    <div class="input-row">
+      <textarea id="requestInput" placeholder='e.g. "Deploy nginx with 3 replicas and a postgres database"'></textarea>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button class="btn btn-mic" id="micBtn" title="Hold to speak">🎤</button>
+        <button class="btn btn-deploy" id="deployBtn">Deploy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div class="card hidden" id="loadingCard">
+    <div class="loader">
+      <div class="spinner"></div>
+      <span id="loadingText">Processing your request...</span>
+    </div>
+  </div>
+
+  <!-- Deployed Resources -->
+  <div class="card hidden" id="resultsCard">
+    <div class="section-title">Deployed Resources</div>
+    <ul class="status-list" id="statusList"></ul>
+  </div>
+
+  <!-- URL -->
+  <div class="card hidden" id="urlCard">
+    <div class="url-box">
+      <h3>🎉 Your deployment is ready!</h3>
+      <p style="color:#94a3b8;margin-bottom:10px;font-size:0.9rem;">Run this command to access it:</p>
+      <code id="accessCommand" style="color:#06b6d4;font-size:1rem;"></code>
+    </div>
+  </div>
+
+  <script>
+    const BACKEND = 'http://localhost:8000';
+
+    const deployBtn = document.getElementById('deployBtn');
+    const micBtn = document.getElementById('micBtn');
+    const requestInput = document.getElementById('requestInput');
+    const loadingCard = document.getElementById('loadingCard');
+    const loadingText = document.getElementById('loadingText');
+    const resultsCard = document.getElementById('resultsCard');
+    const statusList = document.getElementById('statusList');
+    const urlCard = document.getElementById('urlCard');
+    const accessCommand = document.getElementById('accessCommand');
+
+    // Voice Recognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      micBtn.addEventListener('click', () => {
+        micBtn.classList.add('listening');
+        micBtn.textContent = '🔴';
+        recognition.start();
+      });
+
+      recognition.onresult = (e) => {
+        requestInput.value = e.results[0][0].transcript;
+        micBtn.classList.remove('listening');
+        micBtn.textContent = '🎤';
+      };
+
+      recognition.onerror = () => {
+        micBtn.classList.remove('listening');
+        micBtn.textContent = '🎤';
+      };
+
+      recognition.onend = () => {
+        micBtn.classList.remove('listening');
+        micBtn.textContent = '🎤';
+      };
+    } else {
+      micBtn.disabled = true;
+      micBtn.title = 'Voice not supported in this browser. Use Chrome.';
+    }
+
+    // Deploy
+    deployBtn.addEventListener('click', async () => {
+      const request = requestInput.value.trim();
+      if (!request) return;
+
+      // Reset UI
+      loadingCard.classList.remove('hidden');
+      resultsCard.classList.add('hidden');
+      urlCard.classList.add('hidden');
+      statusList.innerHTML = '';
+      loadingText.textContent = 'Extracting intent with AI...';
+      deployBtn.disabled = true;
+
+      try {
+        loadingText.textContent = 'Generating and deploying resources...';
+
+        const res = await fetch(`${BACKEND}/deploy`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ request })
+        });
+
+        const data = await res.json();
+        loadingCard.classList.add('hidden');
+
+        if (data.error) {
+          statusList.innerHTML = `<li class="status-item error">❌ ${data.error}</li>`;
+          resultsCard.classList.remove('hidden');
+          return;
+        }
+
+        // Show deployed resources
+        resultsCard.classList.remove('hidden');
+        data.deployed.forEach(item => {
+          const li = document.createElement('li');
+          const isCreated = item.status === 'created';
+          li.className = `status-item ${isCreated ? 'created' : 'error'}`;
+          li.innerHTML = `
+            <span>${isCreated ? '✅' : '❌'}</span>
+            <span><strong>${item.kind}</strong> — ${item.name}</span>
+            <span style="margin-left:auto;color:${isCreated ? '#22c55e' : '#ef4444'}">${isCreated ? 'Created' : 'Failed'}</span>
+          `;
+          statusList.appendChild(li);
+        });
+
+        // Show access command
+        const appName = data.intent?.app_name;
+        if (appName) {
+          urlCard.classList.remove('hidden');
+          accessCommand.textContent = `minikube service ${appName}-service --url`;
+        }
+
+      } catch (err) {
+        loadingCard.classList.add('hidden');
+        statusList.innerHTML = `<li class="status-item error">❌ Could not connect to backend</li>`;
+        resultsCard.classList.remove('hidden');
+      } finally {
+        deployBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
