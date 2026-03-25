@@ -184,19 +184,10 @@ class DeployRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    try:
-        v1 = client.CoreV1Api()
-        v1.list_namespace(_request_timeout=3)
-        cluster_status = "connected"
-    except:
-        cluster_status = "disconnected"
-    return {"status": "ok", "cluster": cluster_status}
+    return {"status": "ok"}
 
 @app.post("/deploy")
 def deploy(body: DeployRequest):
-    # Check cluster reachability first
-    if not is_cluster_reachable():
-        return {"error": "Kubernetes cluster is not reachable. Please start Minikube first."}
 
     # Step 1 - Use Ollama to extract intent as JSON
     intent_prompt = f"""I need you to fill in a JSON template based on a user request.
