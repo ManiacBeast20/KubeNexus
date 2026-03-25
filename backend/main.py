@@ -26,6 +26,16 @@ try:
 except:
     config.load_kube_config()
 
+# ── Cluster Health Check ───────────────────────────────
+
+def is_cluster_reachable():
+    try:
+        v1 = client.CoreV1Api()
+        v1.list_namespace(_request_timeout=3)
+        return True
+    except:
+        return False
+
 # ── Templates ──────────────────────────────────────────
 
 def generate_deployment_yaml(name, image, replicas=1, port=80):
@@ -174,10 +184,20 @@ class DeployRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    try:
+        v1 = client.CoreV1Api()
+        v1.list_namespace(_request_timeout=3)
+        cluster_status = "connected"
+    except:
+        cluster_status = "disconnected"
+    return {"status": "ok", "cluster": cluster_status}
 
 @app.post("/deploy")
 def deploy(body: DeployRequest):
+    # Check cluster reachability first
+    if not is_cluster_reachable():
+        return {"error": "Kubernetes cluster is not reachable. Please start Minikube first."}
+
     # Step 1 - Use Ollama to extract intent as JSON
     intent_prompt = f"""I need you to fill in a JSON template based on a user request.
 
@@ -228,7 +248,7 @@ Output JSON only, nothing else:"""
     database_type = intent.get("database_type", "")
     cpu_threshold = int(intent.get("cpu_threshold", 70))
 
-   # Fix inconsistencies from LLM
+    # Fix inconsistencies from LLM
     needs_database = intent.get("needs_database", False) or (database_type in ["postgres", "mysql", "redis"])
     needs_hpa = intent.get("needs_hpa", False) or any(word in body.request.lower() for word in ["autoscale", "hpa", "auto scale", "scaling", "scale"])
 
