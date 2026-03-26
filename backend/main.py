@@ -169,30 +169,63 @@ def apply_manifest(manifest):
     except Exception as e:
         return {"kind": kind, "name": name, "status": f"error: {str(e)}"}
 
-# ── Common image typo corrections ──────────────────────
+# ── Common image corrections ───────────────────────────
 
 IMAGE_CORRECTIONS = {
+    # nginx variations
     "ngix": "nginx:latest",
     "ngnix": "nginx:latest",
     "niginx": "nginx:latest",
     "nginix": "nginx:latest",
+    "nginx": "nginx:latest",
+    # postgres variations
     "postgress": "postgres:latest",
     "postgresl": "postgres:latest",
-    "postgrес": "postgres:latest",
+    "postgresql": "postgres:latest",
+    "postgres": "postgres:latest",
+    # redis variations
     "reddis": "redis:latest",
     "rediss": "redis:latest",
-    "apche": "apache:latest",
-    "appache": "apache:latest",
-    "monogo": "mongo:latest",
-    "monggo": "mongo:latest",
+    "redis": "redis:latest",
+    # mysql variations
     "msql": "mysql:latest",
     "mysqll": "mysql:latest",
+    "mysql": "mysql:latest",
+    # mongo variations
+    "monogo": "mongo:latest",
+    "monggo": "mongo:latest",
+    "mongodb": "mongo:latest",
+    "mongo": "mongo:latest",
+    # apache variations
+    "apche": "httpd:latest",
+    "appache": "httpd:latest",
+    "apache": "httpd:latest",
+    # node variations
+    "node": "node:latest",
+    "nodejs": "node:latest",
+    # python variations
+    "python": "python:latest",
+    # ubuntu variations
+    "ubuntu": "ubuntu:latest",
+    # wordpress variations
+    "wordpress": "wordpress:latest",
+    # grafana variations
+    "grafana": "grafana/grafana:latest",
 }
 
-def correct_image_typo(image_name):
-    base = image_name.split(":")[0].lower()
+def correct_image(image_name):
+    # If image already has a tag and a slash (custom image), return as is
+    if "/" in image_name:
+        return image_name, False
+    base = image_name.split(":")[0].lower().strip()
     if base in IMAGE_CORRECTIONS:
-        return IMAGE_CORRECTIONS[base], True
+        corrected = IMAGE_CORRECTIONS[base]
+        # Only mark as corrected if it was actually a typo or missing tag
+        was_corrected = corrected != f"{base}:latest"
+        return corrected, was_corrected
+    # If image has no tag add :latest
+    if ":" not in image_name:
+        return f"{image_name}:latest", False
     return image_name, False
 
 # ── AI Self Healing ────────────────────────────────────
@@ -211,8 +244,8 @@ def analyze_and_fix_pod(pod_name, deployment_name, original_image, namespace="de
     except:
         event_messages = []
 
-    # First try hardcoded typo correction
-    corrected_image, was_typo = correct_image_typo(original_image)
+    # First try hardcoded correction
+    corrected_image, was_typo = correct_image(original_image)
 
     if was_typo:
         analysis = {
@@ -230,11 +263,7 @@ def analyze_and_fix_pod(pod_name, deployment_name, original_image, namespace="de
 Requested image: {original_image}
 Error events: {json.dumps(event_messages)}
 
-This is likely a typo in the image name. Common corrections:
-- ngix -> nginx
-- ngnix -> nginx
-- postgress -> postgres
-- reddis -> redis
+The image could not be pulled. Identify if this is a typo and suggest the correct image name.
 
 Respond ONLY in this exact JSON format:
 {{
@@ -278,7 +307,7 @@ Respond ONLY in this exact JSON format:
     # Apply fix if possible
     if analysis.get("is_auto_fixable") and analysis.get("fix_type") == "image_correction":
         fix_value = analysis.get("fix_value", "")
-        if fix_value and " " not in fix_value:  # Make sure it's a valid image name
+        if fix_value and " " not in fix_value:
             try:
                 deployment = apps_v1.read_namespaced_deployment(
                     name=deployment_name,
@@ -395,7 +424,6 @@ def health():
 
 @app.post("/deploy")
 def deploy(body: DeployRequest):
-    # Step 1 - Use Ollama to extract intent as JSON
     intent_prompt = f"""I need you to fill in a JSON template based on a user request.
 
 User request: "{body.request}"
@@ -406,9 +434,14 @@ Output:
 {{"app_name": "nginx", "image": "nginx:latest", "replicas": 3, "port": 80, "needs_database": false, "database_type": "", "cpu_threshold": 70, "needs_hpa": false}}
 
 Another example:
-User request: "deploy my app using myuser/myapp:v1 with postgres database and autoscale at 60 percent"
+User request: "deploy my app named mywebsite using nginx:latest with postgres database and autoscale at 60 percent"
 Output:
-{{"app_name": "myapp", "image": "myuser/myapp:v1", "replicas": 1, "port": 80, "needs_database": true, "database_type": "postgres", "cpu_threshold": 60, "needs_hpa": true}}
+{{"app_name": "mywebsite", "image": "nginx:latest", "replicas": 1, "port": 80, "needs_database": true, "database_type": "postgres", "cpu_threshold": 60, "needs_hpa": true}}
+
+Another example:
+User request: "deploy myapplication using nginx with 2 replicas"
+Output:
+{{"app_name": "myapplication", "image": "nginx:latest", "replicas": 2, "port": 80, "needs_database": false, "database_type": "", "cpu_threshold": 70, "needs_hpa": false}}
 
 Now fill in the JSON for this request: "{body.request}"
 Output JSON only, nothing else:"""
@@ -445,6 +478,9 @@ Output JSON only, nothing else:"""
 
     needs_database = intent.get("needs_database", False) or (database_type in ["postgres", "mysql", "redis"])
     needs_hpa = intent.get("needs_hpa", False) or any(word in body.request.lower() for word in ["autoscale", "hpa", "auto scale", "scaling", "scale"])
+
+    # Correct image if needed
+    image, _ = correct_image(image)
 
     # Build manifests
     manifests = []
