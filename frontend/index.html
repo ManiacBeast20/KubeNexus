@@ -8,8 +8,8 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      background: #0f1117;
-      color: #e2e8f0;
+      background: #ffffff;
+      color: #1a1a2e;
       font-family: 'Segoe UI', sans-serif;
       min-height: 100vh;
       display: flex;
@@ -20,86 +20,109 @@
 
     .header {
       text-align: center;
-      margin-bottom: 40px;
+      margin-bottom: 48px;
+    }
+
+    .header img {
+      width: 120px;
+      height: 120px;
+      object-fit: contain;
+      margin-bottom: 16px;
     }
 
     .header h1 {
-      font-size: 2.5rem;
-      font-weight: 700;
-      background: linear-gradient(135deg, #6366f1, #06b6d4);
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
+      font-size: 2.2rem;
+      font-weight: 800;
+      color: #1a1a2e;
+      letter-spacing: -0.5px;
     }
 
     .header p {
-      color: #94a3b8;
-      margin-top: 8px;
-      font-size: 1rem;
+      color: #6b7280;
+      margin-top: 6px;
+      font-size: 0.95rem;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
     }
 
     .card {
-      background: #1e2130;
-      border: 1px solid #2d3148;
+      background: #ffffff;
+      border: 1.5px solid #e5e7eb;
       border-radius: 16px;
-      padding: 32px;
+      padding: 28px;
       width: 100%;
-      max-width: 800px;
-      margin-bottom: 24px;
+      max-width: 780px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
     }
 
     .input-row {
       display: flex;
       gap: 12px;
-      align-items: center;
+      align-items: flex-start;
     }
 
     textarea {
       flex: 1;
-      background: #0f1117;
-      border: 1px solid #2d3148;
+      background: #f9fafb;
+      border: 1.5px solid #e5e7eb;
       border-radius: 10px;
-      color: #e2e8f0;
+      color: #1a1a2e;
       padding: 14px;
-      font-size: 1rem;
+      font-size: 0.95rem;
       resize: none;
-      height: 80px;
+      height: 90px;
       outline: none;
+      font-family: 'Segoe UI', sans-serif;
+      transition: border-color 0.2s;
     }
 
     textarea:focus {
-      border-color: #6366f1;
+      border-color: #f5a623;
+    }
+
+    textarea::placeholder {
+      color: #9ca3af;
     }
 
     .btn {
-      padding: 12px 24px;
+      padding: 12px 22px;
       border-radius: 10px;
       border: none;
       cursor: pointer;
-      font-size: 0.95rem;
-      font-weight: 600;
+      font-size: 0.9rem;
+      font-weight: 700;
       transition: all 0.2s;
     }
 
     .btn-deploy {
-      background: linear-gradient(135deg, #6366f1, #06b6d4);
-      color: white;
+      background: #1a1a2e;
+      color: #ffffff;
+      letter-spacing: 0.3px;
     }
 
-    .btn-deploy:hover { opacity: 0.9; }
+    .btn-deploy:hover {
+      background: #f5a623;
+      color: #1a1a2e;
+    }
+
+    .btn-deploy:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
 
     .btn-mic {
-      background: #1e2130;
-      border: 1px solid #2d3148;
-      color: #e2e8f0;
-      font-size: 1.4rem;
-      padding: 12px 16px;
+      background: #f9fafb;
+      border: 1.5px solid #e5e7eb;
+      color: #1a1a2e;
+      font-size: 1.3rem;
+      padding: 12px 14px;
       border-radius: 10px;
     }
 
     .btn-mic.listening {
-      background: #ef4444;
-      border-color: #ef4444;
+      background: #fef3c7;
+      border-color: #f5a623;
       animation: pulse 1s infinite;
     }
 
@@ -109,11 +132,11 @@
     }
 
     .section-title {
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: #6366f1;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #9ca3af;
       text-transform: uppercase;
-      letter-spacing: 1px;
+      letter-spacing: 1.2px;
       margin-bottom: 16px;
     }
 
@@ -121,7 +144,7 @@
       list-style: none;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
     }
 
     .status-item {
@@ -129,66 +152,79 @@
       align-items: center;
       gap: 10px;
       padding: 10px 14px;
-      background: #0f1117;
+      background: #f9fafb;
       border-radius: 8px;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
+      color: #374151;
     }
 
     .status-item.created { border-left: 3px solid #22c55e; }
     .status-item.error { border-left: 3px solid #ef4444; }
-    .status-item.loading { border-left: 3px solid #f59e0b; }
+    .status-item.loading { border-left: 3px solid #f5a623; }
 
     .url-box {
-      background: #0f1117;
-      border: 1px solid #22c55e;
+      background: #f0fdf4;
+      border: 1.5px solid #bbf7d0;
       border-radius: 10px;
       padding: 20px;
       text-align: center;
     }
 
     .url-box h3 {
-      color: #22c55e;
-      font-size: 1.2rem;
-      margin-bottom: 10px;
-    }
-
-    .url-box a {
-      color: #06b6d4;
+      color: #15803d;
       font-size: 1.1rem;
-      text-decoration: none;
+      margin-bottom: 8px;
     }
 
-    .url-box a:hover { text-decoration: underline; }
+    .url-box code {
+      color: #1a1a2e;
+      font-size: 0.95rem;
+      background: #dcfce7;
+      padding: 6px 12px;
+      border-radius: 6px;
+      display: inline-block;
+      margin-top: 6px;
+    }
 
     .hidden { display: none; }
 
     .loader {
       display: flex;
       align-items: center;
-      gap: 10px;
-      color: #94a3b8;
+      gap: 12px;
+      color: #6b7280;
       font-size: 0.9rem;
     }
 
     .spinner {
       width: 18px;
       height: 18px;
-      border: 2px solid #2d3148;
-      border-top-color: #6366f1;
+      border: 2px solid #e5e7eb;
+      border-top-color: #f5a623;
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
+      flex-shrink: 0;
     }
 
     @keyframes spin {
       to { transform: rotate(360deg); }
+    }
+
+    .divider {
+      width: 100%;
+      max-width: 780px;
+      height: 1px;
+      background: #f3f4f6;
+      margin: 4px 0 20px 0;
     }
   </style>
 </head>
 <body>
 
   <div class="header">
-    <h1>⚡ KubeNexus</h1>
-    <p>Voice & Text driven Natural Language Kubernetes Automation</p>
+    <img src="logo.png" alt="KubeNexus Logo" />
+    <h1>KubeNexus</h1>
+    <p>Intelligent Kubernetes Automation</p>
   </div>
 
   <!-- Input Card -->
@@ -220,9 +256,9 @@
   <!-- URL -->
   <div class="card hidden" id="urlCard">
     <div class="url-box">
-      <h3>🎉 Your deployment is ready!</h3>
-      <p style="color:#94a3b8;margin-bottom:10px;font-size:0.9rem;">Run this command to access it:</p>
-      <code id="accessCommand" style="color:#06b6d4;font-size:1rem;"></code>
+      <h3>🎉 Deployment Ready</h3>
+      <p style="color:#6b7280;font-size:0.85rem;">Run this command to get the URL:</p>
+      <code id="accessCommand"></code>
     </div>
   </div>
 
@@ -277,7 +313,7 @@
       };
     } else {
       micBtn.disabled = true;
-      micBtn.title = 'Voice not supported in this browser. Use Chrome.';
+      micBtn.title = 'Voice not supported. Use Chrome.';
     }
 
     // Poll watch status
@@ -326,7 +362,6 @@
       const request = requestInput.value.trim();
       if (!request) return;
 
-      // Reset UI
       loadingCard.classList.remove('hidden');
       resultsCard.classList.add('hidden');
       urlCard.classList.add('hidden');
@@ -354,7 +389,6 @@
           return;
         }
 
-        // Show deployed resources
         resultsCard.classList.remove('hidden');
         data.deployed.forEach(item => {
           const li = document.createElement('li');
@@ -368,14 +402,12 @@
           statusList.appendChild(li);
         });
 
-        // Show access command
         const appName = data.intent?.app_name;
         if (appName) {
           urlCard.classList.remove('hidden');
           accessCommand.textContent = `minikube service ${appName}-service --url`;
         }
 
-        // Start watching
         if (data.watch_id) {
           pollWatchStatus(data.watch_id);
         }
