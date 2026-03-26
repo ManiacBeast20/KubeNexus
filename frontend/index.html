@@ -138,18 +138,6 @@
     .status-item.error { border-left: 3px solid #ef4444; }
     .status-item.loading { border-left: 3px solid #f59e0b; }
 
-    .yaml-box {
-      background: #0f1117;
-      border-radius: 10px;
-      padding: 16px;
-      font-family: monospace;
-      font-size: 0.82rem;
-      color: #94a3b8;
-      white-space: pre-wrap;
-      max-height: 300px;
-      overflow-y: auto;
-    }
-
     .url-box {
       background: #0f1117;
       border: 1px solid #22c55e;
@@ -209,7 +197,7 @@
     <div class="input-row">
       <textarea id="requestInput" placeholder='e.g. "Deploy nginx with 3 replicas and a postgres database"'></textarea>
       <div style="display:flex;flex-direction:column;gap:8px;">
-        <button class="btn btn-mic" id="micBtn" title="Hold to speak">🎤</button>
+        <button class="btn btn-mic" id="micBtn" title="Click to speak">🎤</button>
         <button class="btn btn-deploy" id="deployBtn">Deploy</button>
       </div>
     </div>
@@ -238,6 +226,12 @@
     </div>
   </div>
 
+  <!-- AI Watch Log -->
+  <div class="card hidden" id="watchCard">
+    <div class="section-title">AI Watch Log</div>
+    <ul class="status-list" id="watchList"></ul>
+  </div>
+
   <script>
     const BACKEND = 'http://localhost:8000';
 
@@ -250,6 +244,8 @@
     const statusList = document.getElementById('statusList');
     const urlCard = document.getElementById('urlCard');
     const accessCommand = document.getElementById('accessCommand');
+    const watchCard = document.getElementById('watchCard');
+    const watchList = document.getElementById('watchList');
 
     // Voice Recognition
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -284,6 +280,47 @@
       micBtn.title = 'Voice not supported in this browser. Use Chrome.';
     }
 
+    // Poll watch status
+    async function pollWatchStatus(watchId) {
+      watchCard.classList.remove('hidden');
+      watchList.innerHTML = '<li class="status-item loading">🔍 AI is monitoring your deployment...</li>';
+
+      const interval = setInterval(async () => {
+        try {
+          const res = await fetch(`${BACKEND}/watch/${watchId}`);
+          const data = await res.json();
+
+          watchList.innerHTML = '';
+
+          if (data.events && data.events.length > 0) {
+            data.events.forEach(event => {
+              const li = document.createElement('li');
+              const isError = event.type === 'error_detected';
+              const isFix = event.type === 'fix_applied';
+              const isSuccess = event.type === 'success';
+              li.className = `status-item ${isError ? 'error' : isSuccess || isFix ? 'created' : 'loading'}`;
+              li.innerHTML = `<span>${event.message}</span>`;
+              watchList.appendChild(li);
+            });
+          } else {
+            watchList.innerHTML = '<li class="status-item loading">🔍 AI is monitoring your deployment...</li>';
+          }
+
+          if (data.status === 'complete' || data.status === 'timeout') {
+            clearInterval(interval);
+            if (data.status === 'timeout') {
+              const li = document.createElement('li');
+              li.className = 'status-item error';
+              li.innerHTML = '<span>⏱️ Watch timed out after 2 minutes</span>';
+              watchList.appendChild(li);
+            }
+          }
+        } catch (err) {
+          clearInterval(interval);
+        }
+      }, 5000);
+    }
+
     // Deploy
     deployBtn.addEventListener('click', async () => {
       const request = requestInput.value.trim();
@@ -293,7 +330,9 @@
       loadingCard.classList.remove('hidden');
       resultsCard.classList.add('hidden');
       urlCard.classList.add('hidden');
+      watchCard.classList.add('hidden');
       statusList.innerHTML = '';
+      watchList.innerHTML = '';
       loadingText.textContent = 'Extracting intent with AI...';
       deployBtn.disabled = true;
 
@@ -334,6 +373,11 @@
         if (appName) {
           urlCard.classList.remove('hidden');
           accessCommand.textContent = `minikube service ${appName}-service --url`;
+        }
+
+        // Start watching
+        if (data.watch_id) {
+          pollWatchStatus(data.watch_id);
         }
 
       } catch (err) {

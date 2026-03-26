@@ -6,6 +6,8 @@ import yaml
 import os
 import json
 import base64
+import time
+import threading
 from kubernetes import client, config
 
 app = FastAPI()
@@ -25,16 +27,6 @@ try:
     config.load_incluster_config()
 except:
     config.load_kube_config()
-
-# ── Cluster Health Check ───────────────────────────────
-
-def is_cluster_reachable():
-    try:
-        v1 = client.CoreV1Api()
-        v1.list_namespace(_request_timeout=3)
-        return True
-    except:
-        return False
 
 # ── Templates ──────────────────────────────────────────
 
@@ -177,6 +169,221 @@ def apply_manifest(manifest):
     except Exception as e:
         return {"kind": kind, "name": name, "status": f"error: {str(e)}"}
 
+# ── Common image typo corrections ──────────────────────
+
+IMAGE_CORRECTIONS = {
+    "ngix": "nginx:latest",
+    "ngnix": "nginx:latest",
+    "niginx": "nginx:latest",
+    "nginix": "nginx:latest",
+    "postgress": "postgres:latest",
+    "postgresl": "postgres:latest",
+    "postgrес": "postgres:latest",
+    "reddis": "redis:latest",
+    "rediss": "redis:latest",
+    "apche": "apache:latest",
+    "appache": "apache:latest",
+    "monogo": "mongo:latest",
+    "monggo": "mongo:latest",
+    "msql": "mysql:latest",
+    "mysqll": "mysql:latest",
+}
+
+def correct_image_typo(image_name):
+    base = image_name.split(":")[0].lower()
+    if base in IMAGE_CORRECTIONS:
+        return IMAGE_CORRECTIONS[base], True
+    return image_name, False
+
+# ── AI Self Healing ────────────────────────────────────
+
+def analyze_and_fix_pod(pod_name, deployment_name, original_image, namespace="default"):
+    v1 = client.CoreV1Api()
+    apps_v1 = client.AppsV1Api()
+
+    # Get pod events
+    try:
+        events = v1.list_namespaced_event(
+            namespace=namespace,
+            field_selector=f"involvedObject.name={pod_name}"
+        )
+        event_messages = [e.message for e in events.items if e.message]
+    except:
+        event_messages = []
+
+    # First try hardcoded typo correction
+    corrected_image, was_typo = correct_image_typo(original_image)
+
+    if was_typo:
+        analysis = {
+            "root_cause": f"Typo in image name: '{original_image}' does not exist",
+            "is_auto_fixable": True,
+            "fix_type": "image_correction",
+            "fix_value": corrected_image,
+            "message": f"Image '{original_image}' appears to be a typo. Auto correcting to '{corrected_image}'",
+            "auto_fixed": False
+        }
+    else:
+        # Fall back to Ollama analysis
+        analysis_prompt = f"""A Kubernetes pod has an ImagePullBackOff error.
+
+Requested image: {original_image}
+Error events: {json.dumps(event_messages)}
+
+This is likely a typo in the image name. Common corrections:
+- ngix -> nginx
+- ngnix -> nginx
+- postgress -> postgres
+- reddis -> redis
+
+Respond ONLY in this exact JSON format:
+{{
+  "root_cause": "one sentence explanation",
+  "is_auto_fixable": true or false,
+  "fix_type": "image_correction or none",
+  "fix_value": "corrected docker image name with :latest tag or empty string",
+  "message": "human readable explanation"
+}}"""
+
+        response = requests.post(
+            f"{OLLAMA_HOST}/api/generate",
+            json={
+                "model": OLLAMA_MODEL,
+                "system": "You are a Kubernetes debugging expert. Always respond with valid JSON only. No markdown.",
+                "prompt": analysis_prompt,
+                "stream": False
+            }
+        )
+
+        raw = response.json()["response"].strip()
+        if raw.startswith("```"):
+            raw = "\n".join(raw.split("\n")[1:])
+        if raw.endswith("```"):
+            raw = "\n".join(raw.split("\n")[:-1])
+        raw = raw.strip()
+
+        try:
+            analysis = json.loads(raw)
+            analysis["auto_fixed"] = False
+        except:
+            analysis = {
+                "root_cause": "Could not analyze error",
+                "is_auto_fixable": False,
+                "fix_type": "none",
+                "fix_value": "",
+                "message": "AI could not determine the fix. Please check the image name manually.",
+                "auto_fixed": False
+            }
+
+    # Apply fix if possible
+    if analysis.get("is_auto_fixable") and analysis.get("fix_type") == "image_correction":
+        fix_value = analysis.get("fix_value", "")
+        if fix_value and " " not in fix_value:  # Make sure it's a valid image name
+            try:
+                deployment = apps_v1.read_namespaced_deployment(
+                    name=deployment_name,
+                    namespace=namespace
+                )
+                deployment.spec.template.spec.containers[0].image = fix_value
+                apps_v1.patch_namespaced_deployment(
+                    name=deployment_name,
+                    namespace=namespace,
+                    body=deployment
+                )
+                analysis["auto_fixed"] = True
+            except Exception as e:
+                analysis["auto_fixed"] = False
+                analysis["fix_error"] = str(e)
+
+    return analysis
+
+
+# Shared watch results store
+watch_store = {}
+
+def watch_pods_background(deployment_name, watch_id, original_image, namespace="default"):
+    v1 = client.CoreV1Api()
+    watch_store[watch_id] = {"status": "watching", "events": []}
+
+    max_attempts = 12
+    attempt = 0
+    fixed_pods = set()
+
+    while attempt < max_attempts:
+        time.sleep(10)
+        attempt += 1
+
+        try:
+            pods = v1.list_namespaced_pod(
+                namespace=namespace,
+                label_selector=f"app={deployment_name}"
+            )
+        except:
+            break
+
+        all_running = True
+
+        for pod in pods.items:
+            pod_name = pod.metadata.name
+            container_statuses = pod.status.container_statuses or []
+
+            for cs in container_statuses:
+                waiting = cs.state.waiting
+                if waiting and pod_name not in fixed_pods:
+                    reason = waiting.reason
+                    all_running = False
+
+                    if reason in ["ImagePullBackOff", "ErrImagePull"]:
+                        watch_store[watch_id]["events"].append({
+                            "type": "error_detected",
+                            "pod": pod_name,
+                            "error": reason,
+                            "message": f"⚠️ {reason} detected on {pod_name}"
+                        })
+
+                        analysis = analyze_and_fix_pod(
+                            pod_name,
+                            deployment_name,
+                            original_image,
+                            namespace
+                        )
+                        fixed_pods.add(pod_name)
+
+                        watch_store[watch_id]["events"].append({
+                            "type": "analysis",
+                            "pod": pod_name,
+                            "root_cause": analysis.get("root_cause"),
+                            "message": f"🤖 AI Analysis: {analysis.get('message')}",
+                            "auto_fixed": analysis.get("auto_fixed", False)
+                        })
+
+                        if analysis.get("auto_fixed"):
+                            watch_store[watch_id]["events"].append({
+                                "type": "fix_applied",
+                                "pod": pod_name,
+                                "message": f"🔧 Auto fixed image to: {analysis.get('fix_value')}"
+                            })
+
+                    elif reason == "CrashLoopBackOff":
+                        watch_store[watch_id]["events"].append({
+                            "type": "error_detected",
+                            "pod": pod_name,
+                            "error": reason,
+                            "message": f"⚠️ CrashLoopBackOff detected on {pod_name} — check application logs"
+                        })
+                        fixed_pods.add(pod_name)
+
+        if all_running and pods.items:
+            watch_store[watch_id]["events"].append({
+                "type": "success",
+                "message": "✅ All pods are running successfully"
+            })
+            watch_store[watch_id]["status"] = "complete"
+            break
+
+    if watch_store[watch_id]["status"] == "watching":
+        watch_store[watch_id]["status"] = "timeout"
+
 # ── Routes ─────────────────────────────────────────────
 
 class DeployRequest(BaseModel):
@@ -188,7 +395,6 @@ def health():
 
 @app.post("/deploy")
 def deploy(body: DeployRequest):
-
     # Step 1 - Use Ollama to extract intent as JSON
     intent_prompt = f"""I need you to fill in a JSON template based on a user request.
 
@@ -219,14 +425,12 @@ Output JSON only, nothing else:"""
 
     raw = response.json()["response"].strip()
 
-    # Strip markdown if present
     if raw.startswith("```"):
         raw = "\n".join(raw.split("\n")[1:])
     if raw.endswith("```"):
         raw = "\n".join(raw.split("\n")[:-1])
     raw = raw.strip()
 
-    # Step 2 - Parse intent
     try:
         intent = json.loads(raw)
     except:
@@ -239,11 +443,10 @@ Output JSON only, nothing else:"""
     database_type = intent.get("database_type", "")
     cpu_threshold = int(intent.get("cpu_threshold", 70))
 
-    # Fix inconsistencies from LLM
     needs_database = intent.get("needs_database", False) or (database_type in ["postgres", "mysql", "redis"])
     needs_hpa = intent.get("needs_hpa", False) or any(word in body.request.lower() for word in ["autoscale", "hpa", "auto scale", "scaling", "scale"])
 
-    # Step 3 - Build manifests from templates
+    # Build manifests
     manifests = []
     manifests.append(generate_deployment_yaml(app_name, image, replicas, port))
     manifests.append(generate_service_yaml(app_name, port))
@@ -269,14 +472,31 @@ Output JSON only, nothing else:"""
             manifests.append(generate_deployment_yaml("mysql", "mysql:latest", 1, 3306))
             manifests.append(generate_service_yaml("mysql", 3306, "ClusterIP"))
 
-    # Step 4 - Apply all manifests
+    # Apply all manifests
     results = []
     for manifest in manifests:
         result = apply_manifest(manifest)
         results.append(result)
 
+    # Start background watcher
+    watch_id = f"{app_name}-{int(time.time())}"
+    thread = threading.Thread(
+        target=watch_pods_background,
+        args=(app_name, watch_id, image),
+        daemon=True
+    )
+    thread.start()
+
     return {
         "status": "success",
         "intent": intent,
-        "deployed": results
+        "deployed": results,
+        "watch_id": watch_id
     }
+
+
+@app.get("/watch/{watch_id}")
+def get_watch_status(watch_id: str):
+    if watch_id not in watch_store:
+        return {"status": "not_found", "events": []}
+    return watch_store[watch_id]
