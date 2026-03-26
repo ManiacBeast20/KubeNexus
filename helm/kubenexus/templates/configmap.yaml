@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubenexus-config
+  namespace: {{ .Values.namespace }}
+data:
+  OLLAMA_HOST: {{ .Values.ollama.host }}
+  OLLAMA_MODEL: {{ .Values.ollama.model }}

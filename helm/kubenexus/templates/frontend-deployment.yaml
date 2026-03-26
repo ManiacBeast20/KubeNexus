@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubenexus-frontend
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  selector:
+    matchLabels:
+      app: kubenexus-frontend
+  template:
+    metadata:
+      labels:
+        app: kubenexus-frontend
+    spec:
+      containers:
+      - name: kubenexus-frontend
+        image: {{ .Values.frontend.image }}:{{ .Values.frontend.tag }}
+        ports:
+        - containerPort: {{ .Values.frontend.port }}
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "100m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubenexus-frontend-service
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: kubenexus-frontend
+  ports:
+  - port: {{ .Values.frontend.port }}
+    targetPort: {{ .Values.frontend.port }}
+    nodePort: {{ .Values.frontend.nodePort }}
+  type: NodePort
