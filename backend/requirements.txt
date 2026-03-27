@@ -3,3 +3,4 @@ uvicorn
 requests
 pyyaml
 kubernetes
+prometheus-fastapi-instrumentator

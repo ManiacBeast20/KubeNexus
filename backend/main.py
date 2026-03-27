@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Counter, Histogram
 import requests
 import yaml
 import os
@@ -11,6 +13,30 @@ import threading
 from kubernetes import client, config
 
 app = FastAPI()
+
+# Prometheus metrics
+DEPLOYMENTS_TOTAL = Counter(
+    'kubenexus_deployments_total',
+    'Total number of deployment requests'
+)
+
+DEPLOYMENTS_SUCCESS = Counter(
+    'kubenexus_deployments_success',
+    'Total number of successful deployments'
+)
+
+SELF_HEALS_TOTAL = Counter(
+    'kubenexus_self_heals_total',
+    'Total number of AI self healing events'
+)
+
+OLLAMA_LATENCY = Histogram(
+    'kubenexus_ollama_latency_seconds',
+    'Ollama response latency in seconds'
+)
+
+# Instrument FastAPI
+Instrumentator().instrument(app).expose(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -169,63 +195,30 @@ def apply_manifest(manifest):
     except Exception as e:
         return {"kind": kind, "name": name, "status": f"error: {str(e)}"}
 
-# ── Common image corrections ───────────────────────────
+# ── Common image typo corrections ──────────────────────
 
 IMAGE_CORRECTIONS = {
-    # nginx variations
     "ngix": "nginx:latest",
     "ngnix": "nginx:latest",
     "niginx": "nginx:latest",
     "nginix": "nginx:latest",
     "nginx": "nginx:latest",
-    # postgres variations
     "postgress": "postgres:latest",
     "postgresl": "postgres:latest",
-    "postgresql": "postgres:latest",
-    "postgres": "postgres:latest",
-    # redis variations
     "reddis": "redis:latest",
     "rediss": "redis:latest",
-    "redis": "redis:latest",
-    # mysql variations
-    "msql": "mysql:latest",
-    "mysqll": "mysql:latest",
-    "mysql": "mysql:latest",
-    # mongo variations
+    "apche": "apache:latest",
+    "appache": "apache:latest",
     "monogo": "mongo:latest",
     "monggo": "mongo:latest",
-    "mongodb": "mongo:latest",
-    "mongo": "mongo:latest",
-    # apache variations
-    "apche": "httpd:latest",
-    "appache": "httpd:latest",
-    "apache": "httpd:latest",
-    # node variations
-    "node": "node:latest",
-    "nodejs": "node:latest",
-    # python variations
-    "python": "python:latest",
-    # ubuntu variations
-    "ubuntu": "ubuntu:latest",
-    # wordpress variations
-    "wordpress": "wordpress:latest",
-    # grafana variations
-    "grafana": "grafana/grafana:latest",
+    "msql": "mysql:latest",
+    "mysqll": "mysql:latest",
 }
 
-def correct_image(image_name):
-    # If image already has a tag and a slash (custom image), return as is
-    if "/" in image_name:
-        return image_name, False
-    base = image_name.split(":")[0].lower().strip()
+def correct_image_typo(image_name):
+    base = image_name.split(":")[0].lower()
     if base in IMAGE_CORRECTIONS:
-        corrected = IMAGE_CORRECTIONS[base]
-        # Only mark as corrected if it was actually a typo or missing tag
-        was_corrected = corrected != f"{base}:latest"
-        return corrected, was_corrected
-    # If image has no tag add :latest
-    if ":" not in image_name:
-        return f"{image_name}:latest", False
+        return IMAGE_CORRECTIONS[base], True
     return image_name, False
 
 # ── AI Self Healing ────────────────────────────────────
@@ -234,7 +227,6 @@ def analyze_and_fix_pod(pod_name, deployment_name, original_image, namespace="de
     v1 = client.CoreV1Api()
     apps_v1 = client.AppsV1Api()
 
-    # Get pod events
     try:
         events = v1.list_namespaced_event(
             namespace=namespace,
@@ -244,8 +236,17 @@ def analyze_and_fix_pod(pod_name, deployment_name, original_image, namespace="de
     except:
         event_messages = []
 
-    # First try hardcoded correction
-    corrected_image, was_typo = correct_image(original_image)
+    try:
+        logs = v1.read_namespaced_pod_log(
+            name=pod_name,
+            namespace=namespace,
+            tail_lines=20
+        )
+    except:
+        logs = "No logs available"
+
+    # First try hardcoded typo correction
+    corrected_image, was_typo = correct_image_typo(original_image)
 
     if was_typo:
         analysis = {
@@ -257,13 +258,17 @@ def analyze_and_fix_pod(pod_name, deployment_name, original_image, namespace="de
             "auto_fixed": False
         }
     else:
-        # Fall back to Ollama analysis
+        start_time = time.time()
         analysis_prompt = f"""A Kubernetes pod has an ImagePullBackOff error.
 
 Requested image: {original_image}
 Error events: {json.dumps(event_messages)}
 
-The image could not be pulled. Identify if this is a typo and suggest the correct image name.
+This is likely a typo in the image name. Common corrections:
+- ngix -> nginx
+- ngnix -> nginx
+- postgress -> postgres
+- reddis -> redis
 
 Respond ONLY in this exact JSON format:
 {{
@@ -283,6 +288,7 @@ Respond ONLY in this exact JSON format:
                 "stream": False
             }
         )
+        OLLAMA_LATENCY.observe(time.time() - start_time)
 
         raw = response.json()["response"].strip()
         if raw.startswith("```"):
@@ -320,6 +326,7 @@ Respond ONLY in this exact JSON format:
                     body=deployment
                 )
                 analysis["auto_fixed"] = True
+                SELF_HEALS_TOTAL.inc()
             except Exception as e:
                 analysis["auto_fixed"] = False
                 analysis["fix_error"] = str(e)
@@ -424,6 +431,10 @@ def health():
 
 @app.post("/deploy")
 def deploy(body: DeployRequest):
+    DEPLOYMENTS_TOTAL.inc()
+
+    # Step 1 - Use Ollama to extract intent as JSON
+    start_time = time.time()
     intent_prompt = f"""I need you to fill in a JSON template based on a user request.
 
 User request: "{body.request}"
@@ -434,14 +445,9 @@ Output:
 {{"app_name": "nginx", "image": "nginx:latest", "replicas": 3, "port": 80, "needs_database": false, "database_type": "", "cpu_threshold": 70, "needs_hpa": false}}
 
 Another example:
-User request: "deploy my app named mywebsite using nginx:latest with postgres database and autoscale at 60 percent"
+User request: "deploy my app using myuser/myapp:v1 with postgres database and autoscale at 60 percent"
 Output:
-{{"app_name": "mywebsite", "image": "nginx:latest", "replicas": 1, "port": 80, "needs_database": true, "database_type": "postgres", "cpu_threshold": 60, "needs_hpa": true}}
-
-Another example:
-User request: "deploy myapplication using nginx with 2 replicas"
-Output:
-{{"app_name": "myapplication", "image": "nginx:latest", "replicas": 2, "port": 80, "needs_database": false, "database_type": "", "cpu_threshold": 70, "needs_hpa": false}}
+{{"app_name": "myapp", "image": "myuser/myapp:v1", "replicas": 1, "port": 80, "needs_database": true, "database_type": "postgres", "cpu_threshold": 60, "needs_hpa": true}}
 
 Now fill in the JSON for this request: "{body.request}"
 Output JSON only, nothing else:"""
@@ -455,6 +461,7 @@ Output JSON only, nothing else:"""
             "stream": False
         }
     )
+    OLLAMA_LATENCY.observe(time.time() - start_time)
 
     raw = response.json()["response"].strip()
 
@@ -478,9 +485,6 @@ Output JSON only, nothing else:"""
 
     needs_database = intent.get("needs_database", False) or (database_type in ["postgres", "mysql", "redis"])
     needs_hpa = intent.get("needs_hpa", False) or any(word in body.request.lower() for word in ["autoscale", "hpa", "auto scale", "scaling", "scale"])
-
-    # Correct image if needed
-    image, _ = correct_image(image)
 
     # Build manifests
     manifests = []
@@ -510,9 +514,15 @@ Output JSON only, nothing else:"""
 
     # Apply all manifests
     results = []
+    all_success = True
     for manifest in manifests:
         result = apply_manifest(manifest)
         results.append(result)
+        if "error" in result["status"]:
+            all_success = False
+
+    if all_success:
+        DEPLOYMENTS_SUCCESS.inc()
 
     # Start background watcher
     watch_id = f"{app_name}-{int(time.time())}"
