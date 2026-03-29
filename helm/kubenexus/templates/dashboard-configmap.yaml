@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubenexus-dashboard
+  namespace: {{ .Values.namespace }}
+  labels:
+    grafana_dashboard: "1"
+data:
+  kubenexus-dashboard.json: |-
+{{ .Files.Get "dashboards/kubenexus-dashboard.json" | indent 4 }}

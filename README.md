@@ -151,6 +151,15 @@ You say: "Deploy ngix with 3 replicas"  ← typo!
 
 ## 🚀 Quick Start
 
+**Method 1: Windows 1-Click Automation**
+The easiest way to spin up the entire infrastructure (Minikube, Helm, Prometheus, Grafana, and KubeNexus) is by running the orchestrator script:
+```powershell
+.\start.ps1
+```
+The script will automate the setup, bind the Grafana dashboard via ConfigMap, print your active frontend URL to the terminal, and open your browser automatically.
+
+**Method 2: Manual Installation Steps**
+
 **Step 1 — Install Ollama and pull the model:**
 ```bash
 ollama pull gemma3:1b
@@ -223,6 +232,8 @@ kubectl get hpa -n kubenexus -w
 ---
 
 ## 📊 Monitoring Setup
+
+> **Note:** If you used the `.\start.ps1` script to install, this setup is already completed for you and the custom KubeNexus Grafana Dashboard is hot-loaded automatically!
 
 ```bash
 # Add Prometheus repo
@@ -369,6 +380,7 @@ alerts:
 | 9 | Prometheus + Grafana | ✅ Done |
 | 10 | HPA testing | ✅ Done |
 | 11 | CI/CD + Trivy | ✅ Done |
+| 12 | 1-Click Automation Scripts | ✅ Done |
 
 ---
 
