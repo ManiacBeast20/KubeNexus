@@ -29,6 +29,7 @@ It goes beyond simple deployment by automatically detecting and fixing errors us
 - 🗣️ **Natural Language & Voice** — describe deployments in plain English or speak them out loud
 - 🤖 **AI Self Healing** — detects ImagePullBackOff, typos, and errors and fixes them automatically
 - 🗄️ **Multi-service Support** — deploy apps with PostgreSQL, MySQL, Redis databases and HPA
+- 🔔 **Real-Time Alerts** — native Discord webhooks & SMTP email notifications for deployments and AI fixes
 - 🔒 **Security First** — RBAC, Secrets, ConfigMaps, Trivy image scanning
 - 📊 **Live Monitoring** — Prometheus metrics + Grafana dashboards
 - 📦 **One Command Install** — fully packaged as a Helm chart
@@ -128,6 +129,7 @@ You say: "Deploy ngix with 3 replicas"  ← typo!
 | Backend | Python FastAPI | Core logic |
 | LLM | Ollama (gemma3:1b) | Intent extraction + error analysis |
 | Monitoring | Prometheus + Grafana | Metrics + dashboards |
+| Alerts | Discord Webhook + SMTP | Real-time notifications |
 | CI/CD | GitHub Actions | Automated build + scan |
 | Image Scanning | Trivy | Security gate |
 | Access Control | RBAC + ServiceAccount | Least privilege |
@@ -343,6 +345,11 @@ frontend:
 ollama:
   host: http://host.minikube.internal:11434
   model: gemma3:1b
+
+alerts:
+  discordWebhookUrl: "https://discord.com/api/webhooks/YOUR_WEBHOOK_URL"
+  mailUsername: "youremail@gmail.com"
+  mailPassword: "your-app-password"
 ```
 
 ---
