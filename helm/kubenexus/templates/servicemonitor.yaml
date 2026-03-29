@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kubenexus-backend-monitor
+  namespace: {{ .Values.namespace }}
+  labels:
+    release: monitoring # Standard label for kube-prometheus-stack discovery
+spec:
+  selector:
+    matchLabels:
+      app: kubenexus-backend
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 15s

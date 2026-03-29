@@ -12,6 +12,8 @@ spec:
     metadata:
       labels:
         app: kubenexus-frontend
+      annotations:
+        rollme: {{ randAlphaNum 5 | quote }}
     spec:
       containers:
       - name: kubenexus-frontend

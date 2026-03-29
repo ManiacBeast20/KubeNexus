@@ -3,10 +3,13 @@ kind: Service
 metadata:
   name: kubenexus-backend-service
   namespace: {{ .Values.namespace }}
+  labels:
+    app: kubenexus-backend
 spec:
   selector:
     app: kubenexus-backend
   ports:
-  - port: {{ .Values.backend.port }}
+  - name: metrics
+    port: {{ .Values.backend.port }}
     targetPort: {{ .Values.backend.port }}
   type: ClusterIP

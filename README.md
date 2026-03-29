@@ -197,6 +197,29 @@ Open the URL in Chrome or Edge and start deploying!
 
 ---
 
+## 📈 Testing Auto-Scaling (HPA)
+
+KubeNexus relies on the Kubernetes Metrics Server to drive its HorizontalPodAutoscaler.
+
+**Step 1 — Enable Metrics Server:**
+```bash
+minikube addons enable metrics-server
+```
+
+**Step 2 — Generate Load:**
+Run a busybox pod in a loop to artificially spike CPU pressure on the backend service:
+```bash
+kubectl run -i --tty load-generator --rm --image=busybox:1.28 --restart=Never -- /bin/sh -c "while sleep 0.01; do wget -q -O- http://kubenexus-backend-service:8000/health; done"
+```
+
+**Step 3 — Watch it Scale:**
+Open another terminal pane and watch the HPA spin up from 1 to 5 pods:
+```bash
+kubectl get hpa -n kubenexus -w
+```
+
+---
+
 ## 📊 Monitoring Setup
 
 ```bash
@@ -337,8 +360,8 @@ ollama:
 | 7 | Helm chart | ✅ Done |
 | 8 | RBAC + ConfigMaps + Secrets | ✅ Done |
 | 9 | Prometheus + Grafana | ✅ Done |
-| 10 | HPA testing | 🔄 In Progress |
-| 11 | CI/CD + Trivy | 🔄 In Progress |
+| 10 | HPA testing | ✅ Done |
+| 11 | CI/CD + Trivy | ✅ Done |
 
 ---
 

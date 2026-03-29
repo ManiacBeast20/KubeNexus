@@ -3,238 +3,358 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>KubeNexus</title>
+  <title>KubeNexus API</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --bg-color: #f8fafc;
+      --card-bg: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --accent-amber: #f59e0b;
+      --accent-cyan: #06b6d4;
+      --border-color: #e2e8f0;
+      --glitch-shadow: 2px 2px 0px rgba(6, 182, 212, 0.4), -2px -2px 0px rgba(245, 158, 11, 0.4);
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      background: #ffffff;
-      color: #1a1a2e;
-      font-family: 'Segoe UI', sans-serif;
+      background: var(--bg-color);
+      color: var(--text-main);
+      font-family: 'Outfit', sans-serif;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 40px 20px;
+      padding: 60px 20px;
+      /* Subtle geometric background pattern */
+      background-image: linear-gradient(var(--border-color) 1px, transparent 1px),
+                        linear-gradient(90deg, var(--border-color) 1px, transparent 1px);
+      background-size: 40px 40px;
+      background-position: center center;
+    }
+
+    /* Abstract shapes in the background */
+    .bg-shape-1, .bg-shape-2 {
+      position: fixed;
+      z-index: -1;
+      opacity: 0.4;
+      pointer-events: none;
+    }
+    .bg-shape-1 {
+      top: -100px; right: -100px;
+      width: 400px; height: 400px;
+      background: linear-gradient(135deg, transparent, var(--accent-cyan));
+      clip-path: polygon(0 0, 100% 0, 100% 100%, 0 50%);
+    }
+    .bg-shape-2 {
+      bottom: -100px; left: -100px;
+      width: 500px; height: 300px;
+      background: linear-gradient(135deg, transparent, var(--accent-amber));
+      clip-path: polygon(25% 0%, 100% 0%, 75% 100%, 0% 100%);
     }
 
     .header {
       text-align: center;
-      margin-bottom: 48px;
+      margin-bottom: 50px;
+      position: relative;
     }
 
     .header img {
-      width: 120px;
-      height: 120px;
+      width: 100px;
+      height: 100px;
       object-fit: contain;
-      margin-bottom: 16px;
+      margin-bottom: 20px;
+      filter: drop-shadow(4px 4px 0px var(--accent-cyan));
+      transition: all 0.3s ease;
     }
 
     .header h1 {
-      font-size: 2.2rem;
-      font-weight: 800;
-      color: #1a1a2e;
-      letter-spacing: -0.5px;
+      font-size: 3rem;
+      font-weight: 900;
+      color: var(--text-main);
+      letter-spacing: -1px;
+      text-transform: uppercase;
+      position: relative;
+      display: inline-block;
+    }
+
+    /* Time Stutter Glitch Effect on Title Hover */
+    .header h1:hover {
+      animation: glitch 0.3s linear infinite;
+      text-shadow: var(--glitch-shadow);
+    }
+
+    @keyframes glitch {
+      0% { transform: translate(0) }
+      20% { transform: translate(-2px, 2px) }
+      40% { transform: translate(-2px, -2px) }
+      60% { transform: translate(2px, 2px) }
+      80% { transform: translate(2px, -2px) }
+      100% { transform: translate(0) }
     }
 
     .header p {
-      color: #6b7280;
-      margin-top: 6px;
-      font-size: 0.95rem;
-      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      font-size: 1.1rem;
+      letter-spacing: 2px;
+      font-weight: 600;
       text-transform: uppercase;
     }
 
+    /* Cards with harsh shadows and sharp borders */
     .card {
-      background: #ffffff;
-      border: 1.5px solid #e5e7eb;
-      border-radius: 16px;
-      padding: 28px;
+      background: rgba(255, 255, 255, 0.9);
+      backdrop-filter: blur(10px);
+      border: 2px solid var(--text-main);
+      border-radius: 0px; /* Sharp corners */
+      padding: 30px;
       width: 100%;
-      max-width: 780px;
-      margin-bottom: 20px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      max-width: 800px;
+      margin-bottom: 24px;
+      box-shadow: 8px 8px 0px 0px var(--text-main);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Glitch line accent on top of cards */
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; height: 3px;
+      background: linear-gradient(90deg, var(--accent-amber), var(--accent-cyan));
     }
 
     .input-row {
       display: flex;
-      gap: 12px;
-      align-items: flex-start;
+      gap: 16px;
+      align-items: stretch;
+      margin-top: 10px;
     }
 
     textarea {
       flex: 1;
-      background: #f9fafb;
-      border: 1.5px solid #e5e7eb;
-      border-radius: 10px;
-      color: #1a1a2e;
-      padding: 14px;
-      font-size: 0.95rem;
+      background: var(--bg-color);
+      border: 2px solid var(--text-main);
+      color: var(--text-main);
+      padding: 16px;
+      font-size: 1.05rem;
       resize: none;
-      height: 90px;
+      height: 100px;
       outline: none;
-      font-family: 'Segoe UI', sans-serif;
-      transition: border-color 0.2s;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 400;
+      transition: all 0.2s;
+      box-shadow: inset 2px 2px 0px rgba(0,0,0,0.05);
     }
 
     textarea:focus {
-      border-color: #f5a623;
+      border-color: var(--accent-cyan);
+      box-shadow: 4px 4px 0px rgba(6, 182, 212, 0.3);
     }
 
     textarea::placeholder {
-      color: #9ca3af;
+      color: #94a3b8;
     }
 
     .btn {
-      padding: 12px 22px;
-      border-radius: 10px;
-      border: none;
+      padding: 14px 24px;
+      border: 2px solid var(--text-main);
       cursor: pointer;
-      font-size: 0.9rem;
-      font-weight: 700;
+      font-size: 1rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
       transition: all 0.2s;
+      background: var(--text-main);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
     }
 
     .btn-deploy {
-      background: #1a1a2e;
+      flex: 1;
+      background: var(--text-main);
       color: #ffffff;
-      letter-spacing: 0.3px;
+      position: relative;
     }
 
-    .btn-deploy:hover {
-      background: #f5a623;
-      color: #1a1a2e;
+    .btn-deploy:hover:not(:disabled) {
+      background: var(--accent-cyan);
+      transform: translate(-2px, -2px);
+      box-shadow: 4px 4px 0px var(--text-main);
+    }
+
+    .btn-deploy:active:not(:disabled) {
+      transform: translate(0px, 0px);
+      box-shadow: 0px 0px 0px var(--text-main);
     }
 
     .btn-deploy:disabled {
-      opacity: 0.5;
+      background: #cbd5e1;
+      border-color: #cbd5e1;
       cursor: not-allowed;
     }
 
     .btn-mic {
-      background: #f9fafb;
-      border: 1.5px solid #e5e7eb;
-      color: #1a1a2e;
-      font-size: 1.3rem;
-      padding: 12px 14px;
-      border-radius: 10px;
+      background: #ffffff;
+      color: var(--text-main);
+      font-size: 1.5rem;
+      padding: 16px;
+      height: 100%;
     }
 
+    .btn-mic:hover:not(:disabled) {
+      background: #f1f5f9;
+      transform: translate(-2px, -2px);
+      box-shadow: 4px 4px 0px var(--text-main);
+    }
+
+    /* Listening state - Quantum Break Amber Flare */
     .btn-mic.listening {
-      background: #fef3c7;
-      border-color: #f5a623;
-      animation: pulse 1s infinite;
+      background: var(--accent-amber);
+      color: #fff;
+      border-color: var(--accent-amber);
+      animation: stutterPulse 0.5s infinite;
+      box-shadow: 0 0 15px var(--accent-amber);
     }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
+    @keyframes stutterPulse {
+      0%, 100% { opacity: 1; transform: translate(0); }
+      25% { transform: translate(-1px, 1px); }
+      50% { opacity: 0.8; transform: translate(1px, -1px); }
+      75% { transform: translate(-1px, -1px); }
     }
 
     .section-title {
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: #9ca3af;
+      font-size: 0.85rem;
+      font-weight: 800;
+      color: var(--text-main);
       text-transform: uppercase;
-      letter-spacing: 1.2px;
-      margin-bottom: 16px;
+      letter-spacing: 2px;
+      margin-bottom: 20px;
+      border-left: 4px solid var(--accent-amber);
+      padding-left: 10px;
     }
 
     .status-list {
       list-style: none;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 12px;
     }
 
     .status-item {
       display: flex;
       align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
-      background: #f9fafb;
-      border-radius: 8px;
-      font-size: 0.88rem;
-      color: #374151;
+      gap: 12px;
+      padding: 14px 18px;
+      background: var(--bg-color);
+      border: 1px solid var(--border-color);
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-main);
+      position: relative;
     }
 
-    .status-item.created { border-left: 3px solid #22c55e; }
-    .status-item.error { border-left: 3px solid #ef4444; }
-    .status-item.loading { border-left: 3px solid #f5a623; }
+    /* Corner sharp cutouts (polygon) */
+    .status-item {
+      clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+    }
+
+    .status-item.created { border-left: 4px solid var(--accent-cyan); }
+    .status-item.error { border-left: 4px solid #ef4444; }
+    .status-item.loading { border-left: 4px solid var(--accent-amber); }
 
     .url-box {
       background: #f0fdf4;
-      border: 1.5px solid #bbf7d0;
-      border-radius: 10px;
-      padding: 20px;
+      border: 2px solid #22c55e;
+      padding: 24px;
       text-align: center;
+      position: relative;
     }
 
     .url-box h3 {
-      color: #15803d;
-      font-size: 1.1rem;
-      margin-bottom: 8px;
+      color: #166534;
+      font-size: 1.3rem;
+      margin-bottom: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
 
     .url-box code {
-      color: #1a1a2e;
-      font-size: 0.95rem;
-      background: #dcfce7;
-      padding: 6px 12px;
-      border-radius: 6px;
+      color: #fff;
+      font-size: 1.1rem;
+      font-weight: bold;
+      background: var(--text-main);
+      padding: 10px 16px;
       display: inline-block;
-      margin-top: 6px;
+      margin-top: 10px;
+      border-radius: 4px;
+      box-shadow: 4px 4px 0px rgba(34, 197, 94, 0.4);
     }
 
-    .hidden { display: none; }
+    .hidden { display: none !important; }
 
+    /* Custom geometric loader */
     .loader {
       display: flex;
       align-items: center;
-      gap: 12px;
-      color: #6b7280;
-      font-size: 0.9rem;
+      justify-content: center;
+      gap: 16px;
+      color: var(--text-main);
+      font-size: 1.1rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 20px;
     }
 
     .spinner {
-      width: 18px;
-      height: 18px;
-      border: 2px solid #e5e7eb;
-      border-top-color: #f5a623;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      border: 3px solid var(--border-color);
+      border-top-color: var(--accent-cyan);
+      border-right-color: var(--accent-amber);
+      animation: spinSharp 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;
     }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    @keyframes spinSharp {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
 
-    .divider {
-      width: 100%;
-      max-width: 780px;
-      height: 1px;
-      background: #f3f4f6;
-      margin: 4px 0 20px 0;
-    }
   </style>
 </head>
 <body>
 
+  <div class="bg-shape-1"></div>
+  <div class="bg-shape-2"></div>
+
   <div class="header">
-    <img src="logo.png" alt="KubeNexus Logo" />
+    <img src="logo.png" alt="KubeNexus Logo" onerror="this.style.display='none'"/>
     <h1>KubeNexus</h1>
     <p>Intelligent Kubernetes Automation</p>
   </div>
 
   <!-- Input Card -->
   <div class="card">
-    <div class="section-title">What do you want to deploy?</div>
+    <div class="section-title">Initiate Deployment</div>
     <div class="input-row">
       <textarea id="requestInput" placeholder='e.g. "Deploy nginx with 3 replicas and a postgres database"'></textarea>
-      <div style="display:flex;flex-direction:column;gap:8px;">
+      <div class="btn-controls">
         <button class="btn btn-mic" id="micBtn" title="Click to speak">🎤</button>
-        <button class="btn btn-deploy" id="deployBtn">Deploy</button>
+        <button class="btn btn-deploy" id="deployBtn">Execute</button>
       </div>
     </div>
   </div>
@@ -249,22 +369,22 @@
 
   <!-- Deployed Resources -->
   <div class="card hidden" id="resultsCard">
-    <div class="section-title">Deployed Resources</div>
+    <div class="section-title">Deployed Assets</div>
     <ul class="status-list" id="statusList"></ul>
   </div>
 
   <!-- URL -->
   <div class="card hidden" id="urlCard">
     <div class="url-box">
-      <h3>🎉 Deployment Ready</h3>
-      <p style="color:#6b7280;font-size:0.85rem;">Run this command to get the URL:</p>
+      <h3>🎉 Deployment Secure</h3>
+      <p style="color:#15803d;font-size:0.95rem;font-weight:600;">Run this command to access the endpoint:</p>
       <code id="accessCommand"></code>
     </div>
   </div>
 
   <!-- AI Watch Log -->
   <div class="card hidden" id="watchCard">
-    <div class="section-title">AI Watch Log</div>
+    <div class="section-title">Chronon AI Monitor</div>
     <ul class="status-list" id="watchList"></ul>
   </div>
 
@@ -291,7 +411,7 @@
 
       micBtn.addEventListener('click', () => {
         micBtn.classList.add('listening');
-        micBtn.textContent = '🔴';
+        micBtn.textContent = 'REC';
         recognition.start();
       });
 
@@ -312,13 +432,13 @@
       };
     } else {
       micBtn.disabled = true;
-      micBtn.title = 'Voice not supported. Use Chrome.';
+      micBtn.title = 'Voice not supported. Use Chrome or Edge.';
     }
 
     // Poll watch status
     async function pollWatchStatus(watchId) {
       watchCard.classList.remove('hidden');
-      watchList.innerHTML = '<li class="status-item loading">🔍 AI is monitoring your deployment...</li>';
+      watchList.innerHTML = '<li class="status-item loading">🔍 AI temporal monitoring active...</li>';
 
       const interval = setInterval(async () => {
         try {
@@ -338,7 +458,7 @@
               watchList.appendChild(li);
             });
           } else {
-            watchList.innerHTML = '<li class="status-item loading">🔍 AI is monitoring your deployment...</li>';
+            watchList.innerHTML = '<li class="status-item loading">🔍 AI temporal monitoring active...</li>';
           }
 
           if (data.status === 'complete' || data.status === 'timeout') {
@@ -346,7 +466,7 @@
             if (data.status === 'timeout') {
               const li = document.createElement('li');
               li.className = 'status-item error';
-              li.innerHTML = '<span>⏱️ Watch timed out after 2 minutes</span>';
+              li.innerHTML = '<span>⏱️ Temporal connection lost (timeout after 2 minutes)</span>';
               watchList.appendChild(li);
             }
           }
@@ -367,11 +487,11 @@
       watchCard.classList.add('hidden');
       statusList.innerHTML = '';
       watchList.innerHTML = '';
-      loadingText.textContent = 'Extracting intent with AI...';
+      loadingText.textContent = 'Extracting intent vectors...';
       deployBtn.disabled = true;
 
       try {
-        loadingText.textContent = 'Generating and deploying resources...';
+        loadingText.textContent = 'Materializing resources...';
 
         const res = await fetch(`${BACKEND}/deploy`, {
           method: 'POST',
@@ -396,7 +516,7 @@
           li.innerHTML = `
             <span>${isCreated ? '✅' : '❌'}</span>
             <span><strong>${item.kind}</strong> — ${item.name}</span>
-            <span style="margin-left:auto;color:${isCreated ? '#22c55e' : '#ef4444'}">${isCreated ? 'Created' : 'Failed'}</span>
+            <span style="margin-left:auto;color:${isCreated ? 'var(--accent-cyan)' : '#ef4444'}">${isCreated ? 'Materialized' : 'Failed'}</span>
           `;
           statusList.appendChild(li);
         });
@@ -413,7 +533,7 @@
 
       } catch (err) {
         loadingCard.classList.add('hidden');
-        statusList.innerHTML = `<li class="status-item error">❌ Could not connect to backend</li>`;
+        statusList.innerHTML = `<li class="status-item error">❌ Chronon linkage failed (Backend unreachable)</li>`;
         resultsCard.classList.remove('hidden');
       } finally {
         deployBtn.disabled = false;

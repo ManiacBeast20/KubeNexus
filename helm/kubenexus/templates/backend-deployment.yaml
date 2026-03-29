@@ -12,6 +12,11 @@ spec:
     metadata:
       labels:
         app: kubenexus-backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+        rollme: {{ randAlphaNum 5 | quote }}
     spec:
       serviceAccountName: kubenexus-sa
       containers:
