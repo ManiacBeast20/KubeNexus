@@ -27,14 +27,12 @@ Write-Host 'Waiting for core services to spin up...' -ForegroundColor Yellow
 kubectl rollout status deployment/kubenexus-frontend -n kubenexus --timeout=120s
 kubectl rollout status deployment/kubenexus-backend -n kubenexus --timeout=120s
 
-Write-Host 'Binding Monitoring Dashboard to Localhost:3000...' -ForegroundColor Yellow
+Write-Host 'Binding Front-End & Dashboard to Localhost...' -ForegroundColor Yellow
 Stop-Process -Name 'kubectl' -ErrorAction SilentlyContinue 
 Start-Process powershell -WindowStyle Hidden -ArgumentList '-Command kubectl --namespace monitoring port-forward svc/monitoring-grafana 3000:80'
+Start-Process powershell -WindowStyle Hidden -ArgumentList '-Command kubectl --namespace kubenexus port-forward svc/kubenexus-frontend-service 8080:80'
 
-# Fetch the active URL dynamically (avoids Minikube tunnel blocking on Windows)
-$minikubeIp = (minikube ip).Trim()
-$frontendPort = (kubectl get svc kubenexus-frontend-service -n kubenexus -o jsonpath='{.spec.ports[0].nodePort}').Trim()
-$frontendUrl = "http://${minikubeIp}:${frontendPort}"
+$frontendUrl = "http://localhost:8080"
 
 Write-Host ''
 Write-Host '=======================================================' -ForegroundColor Green
