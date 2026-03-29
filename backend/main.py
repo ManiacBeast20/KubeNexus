@@ -192,6 +192,42 @@ def generate_postgres_deployment_yaml():
         }
     }
 
+def generate_mysql_deployment_yaml():
+    return {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": "mysql"},
+        "spec": {
+            "replicas": 1,
+            "selector": {"matchLabels": {"app": "mysql"}},
+            "template": {
+                "metadata": {"labels": {"app": "mysql"}},
+                "spec": {
+                    "containers": [{
+                        "name": "mysql",
+                        "image": "mysql:latest",
+                        "ports": [{"containerPort": 3306}],
+                        "env": [
+                            {
+                                "name": "MYSQL_ROOT_PASSWORD",
+                                "valueFrom": {
+                                    "secretKeyRef": {
+                                        "name": "mysql-secret",
+                                        "key": "password"
+                                    }
+                                }
+                            },
+                            {
+                                "name": "MYSQL_DATABASE",
+                                "value": "appdb"
+                            }
+                        ]
+                    }]
+                }
+            }
+        }
+    }
+
 # ── Apply manifest to cluster ──────────────────────────
 
 def apply_manifest(manifest):
@@ -542,7 +578,7 @@ Output JSON only, nothing else:"""
             manifests.append(generate_secret_yaml("mysql", {
                 "password": "mysql123"
             }))
-            manifests.append(generate_deployment_yaml("mysql", "mysql:latest", 1, 3306))
+            manifests.append(generate_mysql_deployment_yaml())
             manifests.append(generate_service_yaml("mysql", 3306, "ClusterIP"))
 
     # Apply all manifests
