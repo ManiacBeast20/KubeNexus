@@ -66,3 +66,25 @@ jobs:
           docker push ${{ secrets.DOCKER_USERNAME }}/kubenexus-backend:latest
           docker tag kubenexus-frontend:ci-test ${{ secrets.DOCKER_USERNAME }}/kubenexus-frontend:latest
           docker push ${{ secrets.DOCKER_USERNAME }}/kubenexus-frontend:latest
+
+      # Discord Webhook Notification
+      - name: Send Discord Deployment Alert
+        if: success() && github.event_name == 'push'
+        run: |
+          curl -H "Content-Type: application/json" \
+          -d '{"content": "✅ **KubeNexus Deployment Successful!**\nTrivy scans passed and images have been pushed to Docker Hub! 🚀\nFrontend: `mohammedomar02/kubenexus-frontend:latest`\nBackend: `mohammedomar02/kubenexus-backend:latest`"}' \
+          ${{ secrets.DISCORD_WEBHOOK }}
+
+      # Email Notification
+      - name: Send Email Alert
+        if: success() && github.event_name == 'push'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: ✅ KubeNexus Docker Deployment Successful 
+          to: ${{ secrets.MAIL_USERNAME }}
+          from: GitHub Actions
+          body: The KubeNexus frontend and backend Docker images have successfully passed Trivy vulnerability scans and were pushed to Docker Hub!
