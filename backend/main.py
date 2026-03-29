@@ -10,6 +10,9 @@ import json
 import base64
 import time
 import threading
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from kubernetes import client, config
 
 app = FastAPI()
@@ -47,6 +50,34 @@ app.add_middleware(
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:1b")
+
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+MAIL_USERNAME = os.getenv("MAIL_USERNAME", "")
+MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
+
+def send_discord_alert(title, description):
+    if not DISCORD_WEBHOOK_URL: return
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": f"**{title}**\n{description}"})
+    except Exception as e:
+        print(f"Discord error: {e}")
+
+def send_email_alert(subject, body):
+    if not MAIL_USERNAME or not MAIL_PASSWORD: return
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = "KubeNexus AI"
+        msg['To'] = MAIL_USERNAME
+        msg['Subject'] = subject
+        msg.attach(MIMEText(body, 'plain'))
+        
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+            server.login(MAIL_USERNAME, MAIL_PASSWORD)
+            server.send_message(msg)
+    except Exception as e:
+        print(f"Email error: {e}")
 
 # Load Kubernetes config
 try:
@@ -399,6 +430,8 @@ def watch_pods_background(deployment_name, watch_id, original_image, namespace="
                                 "pod": pod_name,
                                 "message": f"🔧 Auto fixed image to: {analysis.get('fix_value')}"
                             })
+                            send_discord_alert("🔧 AI Self-Heal Initiated", f"Pod: `{pod_name}`\nError: `ImagePullBackOff`\nFix Applied: Swapped image to `{analysis.get('fix_value')}`")
+                            send_email_alert("KubeNexus AI Self-Heal Event", f"Pod {pod_name} encountered an ImagePullBackOff error. KubeNexus correctly analyzed the issue and automatically applied a patch swamping the image to {analysis.get('fix_value')}.")
 
                     elif reason == "CrashLoopBackOff":
                         watch_store[watch_id]["events"].append({
@@ -523,6 +556,8 @@ Output JSON only, nothing else:"""
 
     if all_success:
         DEPLOYMENTS_SUCCESS.inc()
+        send_discord_alert("✅ KubeNexus Successfully Deployed", f"App: `{app_name}`\nImage: `{image}`\nReplicas: `{replicas}`\nDatabase: `{database_type if database_type else 'None'}`\nAutoscaling: `{'Enabled' if needs_hpa else 'Disabled'}`")
+        send_email_alert("✅ KubeNexus New Manifest Deployed", f"KubeNexus successfully interpreted a voice command and applied an orchestration manifest mapping App: {app_name} | Image: {image} | Replicas: {replicas}.")
 
     # Start background watcher
     watch_id = f"{app_name}-{int(time.time())}"

@@ -16,3 +16,8 @@ frontend:
 ollama:
   host: http://host.minikube.internal:11434
   model: gemma3:1b
+
+alerts:
+  discordWebhookUrl: "https://discord.com/api/webhooks/1487759737490640977/N3I1R63_vJ4ApE2RjWAPIoDrI0SlnUB4I5aubrCk2fkthC5r8IlFwVrBQgRc7FjzFmZr"
+  mailUsername: ""
+  mailPassword: ""

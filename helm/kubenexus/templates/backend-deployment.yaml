@@ -22,6 +22,22 @@ spec:
       containers:
       - name: kubenexus-backend
         image: {{ .Values.backend.image }}:{{ .Values.backend.tag }}
+        env:
+        - name: DISCORD_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: kubenexus-alert-secret
+              key: discord-webhook-url
+        - name: MAIL_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: kubenexus-alert-secret
+              key: mail-username
+        - name: MAIL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kubenexus-alert-secret
+              key: mail-password
         ports:
         - containerPort: {{ .Values.backend.port }}
         envFrom:
