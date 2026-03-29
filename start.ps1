@@ -24,6 +24,7 @@ kubectl annotate namespace kubenexus meta.helm.sh/release-name=kubenexus meta.he
 helm upgrade --install kubenexus helm/kubenexus -n kubenexus --create-namespace
 
 Write-Host 'Waiting for core services to spin up...' -ForegroundColor Yellow
+kubectl rollout status deployment/monitoring-grafana -n monitoring --timeout=150s 2>$null | Out-Null
 kubectl rollout status deployment/kubenexus-frontend -n kubenexus --timeout=120s
 kubectl rollout status deployment/kubenexus-backend -n kubenexus --timeout=120s
 

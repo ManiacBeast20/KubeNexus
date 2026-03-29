@@ -22,6 +22,7 @@ kubectl annotate namespace kubenexus meta.helm.sh/release-name=kubenexus meta.he
 helm upgrade --install kubenexus helm/kubenexus -n kubenexus --create-namespace
 
 echo -e "\e[33mWaiting for core services to spin up...\e[0m"
+kubectl rollout status deployment/monitoring-grafana -n monitoring --timeout=150s 2>/dev/null
 kubectl rollout status deployment/kubenexus-frontend -n kubenexus --timeout=120s
 kubectl rollout status deployment/kubenexus-backend -n kubenexus --timeout=120s
 
