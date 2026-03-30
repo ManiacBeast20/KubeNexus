@@ -412,7 +412,6 @@ New engineers deploy production-grade Kubernetes workloads correctly from day on
 **Mohammed Omar (Moe)**
 [@ManiacBeast20](https://github.com/ManiacBeast20)
 
-*Self-taught Cloud DevOps practitioner building toward a DevSecOps career.*
 
 ---
 
