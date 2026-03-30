@@ -48,18 +48,18 @@ It goes beyond simple deployment by automatically detecting and fixing errors us
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Your Browser                          │
-│                    (Voice / Text Input)                      │
+│                        Your Browser                         │
+│                    (Voice / Text Input)                     │
 └─────────────────────────┬───────────────────────────────────┘
                           │ HTTP
                           ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    Minikube Cluster                          │
+│                    Minikube Cluster                         │
 │                                                             │
-│  ┌─────────────────────────────────────────────────────┐   │
+│  ┌──────────────────────────────────────────────────────┐   │
 │  │                 kubenexus namespace                  │   │
-│  │                                                     │   │
-│  │   ┌──────────────────┐    ┌──────────────────────┐  │   │
+│  │                                                      │   │ 
+│  │   ┌──────────────────┐    ┌───────────────────────┐  │   │
 │  │   │  Frontend Pod    │    │    Backend Pod        │  │   │
 │  │   │  (nginx)         │───►│    (FastAPI)          │  │   │
 │  │   │                  │    │                       │  │   │
@@ -73,25 +73,25 @@ It goes beyond simple deployment by automatically detecting and fixing errors us
 │  │          ┌───────────────────────────┤               │   │
 │  │          │                           │               │   │
 │  │          ▼                           ▼               │   │
-│  │   ┌─────────────┐         ┌─────────────────────┐   │   │
-│  │   │ Ollama LLM  │         │   Kubernetes API    │   │   │
-│  │   │(host machine│         │                     │   │   │
-│  │   │ gemma3:1b)  │         │  Creates/manages:   │   │   │
-│  │   │             │         │  - Deployments      │   │   │
-│  │   │ - Extract   │         │  - Services         │   │   │
-│  │   │   intent    │         │  - Secrets          │   │   │
-│  │   │ - Analyze   │         │  - ConfigMaps       │   │   │
-│  │   │   errors    │         │  - HPAs             │   │   │
-│  │   └─────────────┘         └─────────────────────┘   │   │
-│  │                                                     │   │
-│  │   ┌──────────────┐    ┌────────────────────────┐   │   │
-│  │   │  Prometheus  │    │        Grafana          │   │   │
-│  │   │              │───►│                        │   │   │
-│  │   │  Scrapes:    │    │  - Deployment metrics  │   │   │
-│  │   │  - /metrics  │    │  - Self heal events    │   │   │
-│  │   │  - K8s state │    │  - Cluster health      │   │   │
-│  │   └──────────────┘    └────────────────────────┘   │   │
-│  └─────────────────────────────────────────────────────┘   │
+│  │   ┌─────────────┐         ┌─────────────────────┐    │   │
+│  │   │ Ollama LLM  │         │   Kubernetes API    │    │   │
+│  │   │(host machine│         │                     │    │   │
+│  │   │ gemma3:1b)  │         │  Creates/manages:   │    │   │
+│  │   │             │         │  - Deployments      │    │   │
+│  │   │ - Extract   │         │  - Services         │    │   │
+│  │   │   intent    │         │  - Secrets          │    │   │
+│  │   │ - Analyze   │         │  - ConfigMaps       │    │   │
+│  │   │   errors    │         │  - HPAs             │    │   │
+│  │   └─────────────┘         └─────────────────────┘    │   │
+│  │                                                      │   │
+│  │   ┌──────────────┐    ┌────────────────────────┐     │   │
+│  │   │  Prometheus  │    │        Grafana         │     │   │
+│  │   │              │───►│                        │     │   │
+│  │   │  Scrapes:    │    │  - Deployment metrics  │     │   │
+│  │   │  - /metrics  │    │  - Self heal events    │     │   │
+│  │   │  - K8s state │    │  - Cluster health      │     │   │
+│  │   └──────────────┘    └────────────────────────┘     │   │
+│  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -304,7 +304,7 @@ KubeNexus/
 
 ```
 ┌─────────────────────────────────────────────┐
-│              Security Layers                 │
+│              Security Layers                │
 │                                             │
 │  CI/CD Pipeline                             │
 │  └── Trivy scans images before push         │
