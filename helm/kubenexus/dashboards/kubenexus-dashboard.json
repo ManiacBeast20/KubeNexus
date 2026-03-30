@@ -433,7 +433,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m]))",
+          "expr": "sum(rate(http_requests_total{status=~\"5..\"}[1m])) OR on() vector(0)",
           "legendFormat": "5xx Crashes",
           "range": true,
           "refId": "A"
@@ -626,6 +626,7 @@
       "title": "Application Memory Usage (per Pod)",
       "type": "timeseries"
     }
+
 
 
   ],
