@@ -1,5 +1,26 @@
 Write-Host '🚀 Starting KubeNexus Automated Bootstrap...' -ForegroundColor Cyan
 
+# Check Docker Engine
+Write-Host 'Checking Docker Engine...' -ForegroundColor Yellow
+& docker info > $null 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Host 'Docker is not running. Starting Docker Desktop...' -ForegroundColor Yellow
+    $dockerPath = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+    if (Test-Path $dockerPath) {
+        Start-Process $dockerPath
+        Write-Host 'Waiting for Docker to initialize (this may take a minute)...' -ForegroundColor Yellow
+        while ($true) {
+            & docker info > $null 2>&1
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 2
+        }
+        Write-Host 'Docker is ready!' -ForegroundColor Green
+    } else {
+        Write-Host 'ERROR: Docker Desktop not found at default path. Please start Docker manually.' -ForegroundColor Red
+        exit 1
+    }
+}
+
 $minikubeStatus = minikube status --format '{{.Host}}'
 if ($minikubeStatus -ne 'Running') {
     Write-Host 'Starting Minikube...' -ForegroundColor Yellow

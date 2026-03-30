@@ -1,6 +1,22 @@
 #!/bin/bash
 echo -e "\e[36m🚀 Starting KubeNexus Automated Bootstrap...\e[0m"
 
+# Check Docker Engine
+echo -e "\e[33mChecking Docker Engine...\e[1m"
+if ! docker info >/dev/null 2>&1; then
+    echo -e "\e[33mDocker is not running. Starting Docker daemon...\e[0m"
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo systemctl start docker
+    else
+        sudo service docker start
+    fi
+    echo -e "\e[33mWaiting for Docker to initialize...\e[0m"
+    while ! docker info >/dev/null 2>&1; do
+        sleep 2
+    done
+    echo -e "\e[32mDocker is ready!\e[0m"
+fi
+
 if ! minikube status | grep -q 'Running'; then
     echo -e "\e[33mStarting Minikube...\e[0m"
     minikube start
