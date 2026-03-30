@@ -33,8 +33,16 @@ if ! helm ls -n monitoring -q | grep -q '^monitoring$'; then
 fi
 
 echo -e "\e[33mDeploying KubeNexus Infrastructure...\e[0m"
-kubectl label namespace kubenexus app.kubernetes.io/managed-by=Helm --overwrite 2>/dev/null
-kubectl annotate namespace kubenexus meta.helm.sh/release-name=kubenexus meta.helm.sh/release-namespace=kubenexus --overwrite 2>/dev/null
+# Recursively fix all objects in the namespace to prevent ownership errors
+kubectl label namespace kubenexus app.kubernetes.io/managed-by=Helm --overwrite 2>/dev/null | cat >/dev/null
+kubectl annotate namespace kubenexus meta.helm.sh/release-name=kubenexus meta.helm.sh/release-namespace=kubenexus --overwrite 2>/dev/null | cat >/dev/null
+
+for obj in $(kubectl get sa,deploy,svc,hpa -n kubenexus -o name 2>/dev/null); do
+    kubectl label $obj app.kubernetes.io/managed-by=Helm -n kubenexus --overwrite 2>/dev/null | cat >/dev/null
+    kubectl annotate $obj meta.helm.sh/release-name=kubenexus -n kubenexus --overwrite 2>/dev/null | cat >/dev/null
+    kubectl annotate $obj meta.helm.sh/release-namespace=kubenexus -n kubenexus --overwrite 2>/dev/null | cat >/dev/null
+done
+
 helm upgrade --install kubenexus helm/kubenexus -n kubenexus --create-namespace
 
 echo -e "\e[33mWaiting for core services to spin up...\e[0m"

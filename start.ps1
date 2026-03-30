@@ -39,9 +39,16 @@ if (-not $monitoringExists) {
 }
 
 Write-Host 'Deploying KubeNexus Infrastructure...' -ForegroundColor Yellow
-# Override any existing namespace ownership data that throws errors
+# Recursively fix all objects in the namespace to prevent ownership errors
 kubectl label namespace kubenexus app.kubernetes.io/managed-by=Helm --overwrite 2>$null | Out-Null
 kubectl annotate namespace kubenexus meta.helm.sh/release-name=kubenexus meta.helm.sh/release-namespace=kubenexus --overwrite 2>$null | Out-Null
+
+kubectl get sa,deploy,svc,hpa -n kubenexus -o name 2>$null | ForEach-Object {
+    kubectl label $_ app.kubernetes.io/managed-by=Helm -n kubenexus --overwrite 2>$null | Out-Null
+    kubectl annotate $_ meta.helm.sh/release-name=kubenexus -n kubenexus --overwrite 2>$null | Out-Null
+    kubectl annotate $_ meta.helm.sh/release-namespace=kubenexus -n kubenexus --overwrite 2>$null | Out-Null
+}
+
 helm upgrade --install kubenexus helm/kubenexus -n kubenexus --create-namespace
 
 Write-Host 'Waiting for core services to spin up...' -ForegroundColor Yellow
