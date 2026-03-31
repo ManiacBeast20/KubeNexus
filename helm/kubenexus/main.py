@@ -475,14 +475,34 @@ def deploy(body: DeployRequest):
     replicas     = max(1, int(intent.get("replicas", 1)))
     port         = int(intent.get("port", 80))
     db_type      = str(intent.get("database_type", "")).lower().strip()
-
-    # Keyword fallbacks — small AI model often misses these
     raw_lower    = body.request.lower()
+
+    # Keyword-based Database Detection (Force priority over AI for clarity)
+    if "redis" in raw_lower:
+        db_type = "redis"
+    elif "mysql" in raw_lower:
+        db_type = "mysql"
+    elif "postgres" in raw_lower or "postgresql" in raw_lower:
+        db_type = "postgres"
+
     needs_db     = bool(intent.get("needs_database", False)) or \
-                   db_type in ("postgres", "mysql", "redis") or \
+                   db_type != "" or \
                    any(w in raw_lower for w in ("postgres", "mysql", "redis", "database", " db "))
+    
+    # If mentioned "database" but type is still blank, default to postgres
+    if needs_db and db_type == "":
+        db_type = "postgres"
+
     needs_hpa    = bool(intent.get("needs_hpa", False)) or \
                    any(w in raw_lower for w in ("autoscal", "hpa", "auto scale", "autoscale", "scaling", " scale"))
+
+    # Extract replicas from raw request if AI returned default 1
+    replicas = max(1, int(intent.get("replicas", 1)))
+    if replicas == 1:
+        import re
+        m = re.search(r'(\d+)\s*(replicas?|pods?|instances?)', raw_lower)
+        if m:
+            replicas = int(m.group(1))
 
     # Extract cpu_threshold from raw request if AI returned default 70
     cpu_thresh = int(intent.get("cpu_threshold", 70))

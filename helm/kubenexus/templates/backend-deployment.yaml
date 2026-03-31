@@ -22,11 +22,9 @@ spec:
       containers:
       - name: kubenexus-backend
         image: {{ .Values.backend.image }}:{{ .Values.backend.tag }}
+        command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+        workingDir: /app
         env:
-        - name: UVICORN_HOST
-          value: "0.0.0.0"
-        - name: UVICORN_PORT
-          value: {{ .Values.backend.port | quote }}
         - name: DISCORD_WEBHOOK_URL
           valueFrom:
             secretKeyRef:
