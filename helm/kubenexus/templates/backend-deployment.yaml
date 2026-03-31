@@ -56,9 +56,11 @@ spec:
             port: {{ .Values.backend.port }}
           initialDelaySeconds: 10
           periodSeconds: 5
+          failureThreshold: 6
         livenessProbe:
           httpGet:
             path: /health
             port: {{ .Values.backend.port }}
           initialDelaySeconds: 15
           periodSeconds: 10
+          failureThreshold: 6

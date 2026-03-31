@@ -24,7 +24,7 @@ if ($LASTEXITCODE -ne 0) {
 $minikubeStatus = minikube status --format '{{.Host}}'
 if ($minikubeStatus -ne 'Running') {
     Write-Host 'Starting Minikube...' -ForegroundColor Yellow
-    minikube start
+    minikube start --memory 4096
 }
 
 Write-Host 'Ensuring metrics-server is active...' -ForegroundColor Yellow
