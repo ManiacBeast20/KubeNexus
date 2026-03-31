@@ -40,6 +40,10 @@ spec:
               key: mail-password
         ports:
         - containerPort: {{ .Values.backend.port }}
+        volumeMounts:
+        - name: backend-code
+          mountPath: /app/main.py
+          subPath: main.py
         envFrom:
         - configMapRef:
             name: kubenexus-config
@@ -64,3 +68,7 @@ spec:
           initialDelaySeconds: 15
           periodSeconds: 10
           failureThreshold: 6
+      volumes:
+      - name: backend-code
+        configMap:
+          name: kubenexus-backend-code
