@@ -624,22 +624,4 @@ Output JSON only, nothing else:"""
 async def get_watch_status(watch_id: str):
     if watch_id not in watch_store:
         return {"status": "not_found", "events": []}
-    return watch_store[watch_id]
-,
-        daemon=True
-    )
-    thread.start()
-
-    return {
-        "status": "success",
-        "intent": intent,
-        "deployed": results,
-        "watch_id": watch_id
-    }
-
-
-@app.get("/watch/{watch_id}")
-def get_watch_status(watch_id: str):
-    if watch_id not in watch_store:
-        return {"status": "not_found", "events": []}
-    return watch_store[watch_id]
+    return watch_store[watch_id]
