@@ -19,12 +19,18 @@ data:
 
         # Proxy API requests to backend
         location /api/ {
-            # Use a variable to force Nginx to resolve at runtime
-            set $backend_svc "http://kubenexus-backend-service:8000/";
+            # Use a variable with FQDN to force Nginx to resolve at runtime
+            set $backend_svc "http://kubenexus-backend-service.{{ .Values.namespace }}.svc.cluster.local:8000/";
             proxy_pass $backend_svc;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
             proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # Health check
+        location /health {
+            return 200 'OK';
+            add_header Content-Type text/plain;
         }
     }
