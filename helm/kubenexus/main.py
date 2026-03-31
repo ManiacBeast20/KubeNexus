@@ -1,44 +1,29 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Histogram
 import requests
-import yaml
 import os
 import json
 import base64
 import time
 import threading
 import smtplib
+import traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from kubernetes import client, config
 
 app = FastAPI()
 
-# Prometheus metrics
-DEPLOYMENTS_TOTAL = Counter(
-    'kubenexus_deployments_total',
-    'Total number of deployment requests'
-)
+# ── Metrics ────────────────────────────────────────────
+DEPLOYMENTS_TOTAL  = Counter('kubenexus_deployments_total',  'Total deployments')
+DEPLOYMENTS_SUCCESS = Counter('kubenexus_deployments_success', 'Successful deployments')
+SELF_HEALS_TOTAL   = Counter('kubenexus_self_heals_total',   'AI self-heals')
+OLLAMA_LATENCY     = Histogram('kubenexus_ollama_latency_seconds', 'AI latency')
 
-DEPLOYMENTS_SUCCESS = Counter(
-    'kubenexus_deployments_success',
-    'Total number of successful deployments'
-)
-
-SELF_HEALS_TOTAL = Counter(
-    'kubenexus_self_heals_total',
-    'Total number of AI self healing events'
-)
-
-OLLAMA_LATENCY = Histogram(
-    'kubenexus_ollama_latency_seconds',
-    'Ollama response latency in seconds'
-)
-
-# Instrument FastAPI
 Instrumentator().instrument(app).expose(app)
 
 app.add_middleware(
@@ -48,49 +33,252 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:1b")
+# ── Config ─────────────────────────────────────────────
+OLLAMA_HOST      = os.getenv("OLLAMA_HOST",       "http://host.minikube.internal:11434")
+OLLAMA_MODEL     = os.getenv("OLLAMA_MODEL",       "gemma3:1b")
+DISCORD_WEBHOOK  = os.getenv("DISCORD_WEBHOOK_URL", "")
+MAIL_USER        = os.getenv("MAIL_USERNAME",       "")
+MAIL_PASS        = os.getenv("MAIL_PASSWORD",       "")
 
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-MAIL_USERNAME = os.getenv("MAIL_USERNAME", "")
-MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
+# ── Global error handler ────────────────────────────────
+@app.exception_handler(Exception)
+async def global_handler(request: Request, exc: Exception):
+    traceback.print_exc()
+    return JSONResponse(status_code=500, content={"error": str(exc)})
 
-def send_discord_alert(title, description):
-    if not DISCORD_WEBHOOK_URL: return
+# ── Alerts ─────────────────────────────────────────────
+def send_discord(title, body):
+    if not DISCORD_WEBHOOK:
+        return
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json={"content": f"**{title}**\n{description}"})
+        requests.post(DISCORD_WEBHOOK, json={"content": f"**{title}**\n{body}"}, timeout=5)
     except Exception as e:
         print(f"Discord error: {e}")
 
-def send_email_alert(subject, body):
-    if not MAIL_USERNAME or not MAIL_PASSWORD: return
+def send_email(subject, body):
+    if not MAIL_USER or not MAIL_PASS:
+        return
     try:
         msg = MIMEMultipart()
-        msg['From'] = "KubeNexus AI"
-        msg['To'] = MAIL_USERNAME
+        msg['From']    = "KubeNexus AI"
+        msg['To']      = MAIL_USER
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
-        
-        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
-            server.login(MAIL_USERNAME, MAIL_PASSWORD)
-            server.send_message(msg)
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+            s.login(MAIL_USER, MAIL_PASS)
+            s.send_message(msg)
     except Exception as e:
         print(f"Email error: {e}")
 
-# Load Kubernetes config
+# ── Kubernetes ─────────────────────────────────────────
 try:
     config.load_incluster_config()
-except:
+except Exception:
     config.load_kube_config()
 
-# ── Templates ──────────────────────────────────────────
+# ── AI helper ──────────────────────────────────────────
+def call_ollama(system_prompt: str, user_prompt: str, timeout: float = 60.0):
+    """Call Ollama and return parsed JSON. Returns None on any failure."""
+    try:
+        t0 = time.time()
+        resp = requests.post(
+            f"{OLLAMA_HOST}/api/generate",
+            json={"model": OLLAMA_MODEL, "system": system_prompt, "prompt": user_prompt, "stream": False},
+            timeout=timeout,
+        )
+        OLLAMA_LATENCY.observe(time.time() - t0)
+        raw = resp.json().get("response", "").strip()
+        # Strip markdown code fences if present
+        if "```json" in raw:
+            raw = raw.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw:
+            raw = raw.split("```")[1].split("```")[0].strip()
+        return json.loads(raw)
+    except Exception as e:
+        print(f"Ollama error: {e}")
+        return None
 
-def generate_deployment_yaml(name, image, replicas=1, port=80):
+# ── Image typo correction ─────────────────────────────
+IMAGE_FIXES = {
+
+    # ── nginx ────────────────────────────────────────────
+    "ngix":       "nginx:latest",  "ngnix":      "nginx:latest",
+    "niginx":     "nginx:latest",  "nginix":     "nginx:latest",
+    "nignx":      "nginx:latest",  "nxig":       "nginx:latest",
+    "nignix":     "nginx:latest",  "nginxx":     "nginx:latest",
+    "enginx":     "nginx:latest",  "ngnx":       "nginx:latest",
+    "ngixn":      "nginx:latest",  "nxginx":     "nginx:latest",
+    "ngigx":      "nginx:latest",
+
+    # ── postgres ─────────────────────────────────────────
+    "postgress":  "postgres:latest",  "postgresl":  "postgres:latest",
+    "posgres":    "postgres:latest",  "posgtres":   "postgres:latest",
+    "posgress":   "postgres:latest",  "postgre":    "postgres:latest",
+    "postgrse":   "postgres:latest",  "postgers":   "postgres:latest",
+    "potgres":    "postgres:latest",  "postgresq":  "postgres:latest",
+    "postres":    "postgres:latest",  "psotgres":   "postgres:latest",
+    "psql":       "postgres:latest",  "postgresdb": "postgres:latest",
+    "pgsql":      "postgres:latest",  "psotgress":  "postgres:latest",
+
+    # ── redis ─────────────────────────────────────────────
+    "reddis":     "redis:latest",  "rediss":     "redis:latest",
+    "rdeis":      "redis:latest",  "reddiss":    "redis:latest",
+    "reids":      "redis:latest",  "redsi":      "redis:latest",
+    "rdis":       "redis:latest",  "reds":       "redis:latest",
+    "redies":     "redis:latest",  "riddis":     "redis:latest",
+
+    # ── mysql ─────────────────────────────────────────────
+    "msql":       "mysql:latest",  "mysqll":     "mysql:latest",
+    "myslq":      "mysql:latest",  "mysqk":      "mysql:latest",
+    "myssql":     "mysql:latest",  "mysq":       "mysql:latest",
+    "mssql":      "mysql:latest",  "myqsl":      "mysql:latest",
+    "mysqldb":    "mysql:latest",  "musql":      "mysql:latest",
+
+    # ── mongo / mongodb ───────────────────────────────────
+    "monogo":     "mongo:latest",  "monggo":     "mongo:latest",
+    "mangodb":    "mongo:latest",  "mongdb":     "mongo:latest",
+    "mondgo":     "mongo:latest",  "mongodo":    "mongo:latest",
+    "mango":      "mongo:latest",  "mongod":     "mongo:latest",
+    "mongobd":    "mongo:latest",  "mogno":      "mongo:latest",
+    "mongodb":    "mongo:latest",  "mognodb":    "mongo:latest",
+    "monodb":     "mongo:latest",
+
+    # ── apache (httpd) ────────────────────────────────────
+    "apche":      "httpd:latest",  "appache":    "httpd:latest",
+    "apachee":    "httpd:latest",  "apachi":     "httpd:latest",
+    "apach":      "httpd:latest",  "apcahe":     "httpd:latest",
+    "apache":     "httpd:latest",  "apachhe":    "httpd:latest",
+    "apcahe":     "httpd:latest",  "appache":    "httpd:latest",
+
+    # ── node / nodejs ─────────────────────────────────────
+    "nodejs":     "node:latest",   "nodjs":      "node:latest",
+    "nod":        "node:latest",   "nodee":      "node:latest",
+    "ndoe":       "node:latest",   "nde":        "node:latest",
+    "noode":      "node:latest",   "ndoe":       "node:latest",
+    "noedjs":     "node:latest",   "ode":        "node:latest",
+
+    # ── python ────────────────────────────────────────────
+    "pythn":      "python:latest", "pyhton":     "python:latest",
+    "pyton":      "python:latest", "pytho":      "python:latest",
+    "pythong":    "python:latest", "pyython":    "python:latest",
+    "pthon":      "python:latest", "ptyhon":     "python:latest",
+    "pyhon":      "python:latest", "pythonn":    "python:latest",
+
+    # ── ubuntu ────────────────────────────────────────────
+    "ubunu":      "ubuntu:latest", "ubundu":     "ubuntu:latest",
+    "ubunto":     "ubuntu:latest", "ubunut":     "ubuntu:latest",
+    "ubutu":      "ubuntu:latest", "ubuntuu":    "ubuntu:latest",
+    "ubunti":     "ubuntu:latest", "ubbutnu":    "ubuntu:latest",
+    "ubuuntu":    "ubuntu:latest",
+
+    # ── alpine ────────────────────────────────────────────
+    "alpin":      "alpine:latest", "alpne":      "alpine:latest",
+    "alpie":      "alpine:latest", "alpnie":     "alpine:latest",
+    "alpien":     "alpine:latest", "alpinee":    "alpine:latest",
+    "aline":      "alpine:latest", "apline":     "alpine:latest",
+
+    # ── rabbitmq ─────────────────────────────────────────
+    "rabitmq":    "rabbitmq:latest", "rabbtmq":  "rabbitmq:latest",
+    "rabitqm":    "rabbitmq:latest", "rabbitqm": "rabbitmq:latest",
+    "rabiitmq":   "rabbitmq:latest", "rabbitmg": "rabbitmq:latest",
+    "rabbitmqu":  "rabbitmq:latest", "rabbit":   "rabbitmq:latest",
+    "rabbitmqq":  "rabbitmq:latest", "raabbitmq":"rabbitmq:latest",
+
+    # ── elasticsearch ─────────────────────────────────────
+    "elasticsrach":   "elasticsearch:latest",
+    "elasticserach":  "elasticsearch:latest",
+    "elastisearch":   "elasticsearch:latest",
+    "elasticearch":   "elasticsearch:latest",
+    "elastcsearch":   "elasticsearch:latest",
+    "elasicsearch":   "elasticsearch:latest",
+    "elsaticsearch":  "elasticsearch:latest",
+    "elastic":        "elasticsearch:latest",
+    "elastisearh":    "elasticsearch:latest",
+
+    # ── kafka ─────────────────────────────────────────────
+    "kafak":      "bitnami/kafka:latest", "kafke":   "bitnami/kafka:latest",
+    "kafkka":     "bitnami/kafka:latest", "kafqa":   "bitnami/kafka:latest",
+    "kafkae":     "bitnami/kafka:latest", "kafkaa":  "bitnami/kafka:latest",
+    "kakfa":      "bitnami/kafka:latest",
+
+    # ── wordpress ─────────────────────────────────────────
+    "wordpres":   "wordpress:latest", "wordperss":  "wordpress:latest",
+    "wordprss":   "wordpress:latest", "wordpreess": "wordpress:latest",
+    "worpdress":  "wordpress:latest", "wordpresss": "wordpress:latest",
+    "wodrpress":  "wordpress:latest", "wrodpress":  "wordpress:latest",
+
+    # ── jenkins ───────────────────────────────────────────
+    "jenins":     "jenkins/jenkins:lts", "jenkis":    "jenkins/jenkins:lts",
+    "jenkinss":   "jenkins/jenkins:lts", "jenkisn":   "jenkins/jenkins:lts",
+    "jenikins":   "jenkins/jenkins:lts", "jenkin":    "jenkins/jenkins:lts",
+    "jenkns":     "jenkins/jenkins:lts", "jnekins":   "jenkins/jenkins:lts",
+
+    # ── grafana ───────────────────────────────────────────
+    "grafanna":   "grafana/grafana:latest", "graffana": "grafana/grafana:latest",
+    "grafna":     "grafana/grafana:latest", "grafan":   "grafana/grafana:latest",
+    "garfana":    "grafana/grafana:latest", "grafanaa": "grafana/grafana:latest",
+    "grfana":     "grafana/grafana:latest",
+
+    # ── prometheus ────────────────────────────────────────
+    "prometeus":  "prom/prometheus:latest", "promtheus":  "prom/prometheus:latest",
+    "prometuhs":  "prom/prometheus:latest", "premetheus": "prom/prometheus:latest",
+    "promethues": "prom/prometheus:latest", "pometheus":  "prom/prometheus:latest",
+    "prometheuss":"prom/prometheus:latest",
+
+    # ── memcached ─────────────────────────────────────────
+    "memcache":   "memcached:latest", "memcahced":  "memcached:latest",
+    "memcachedd": "memcached:latest", "memcahce":   "memcached:latest",
+    "memached":   "memcached:latest", "memchaced":  "memcached:latest",
+
+    # ── mariadb ───────────────────────────────────────────
+    "maridb":     "mariadb:latest", "maradb":     "mariadb:latest",
+    "maraidb":    "mariadb:latest", "mairdb":     "mariadb:latest",
+    "mariaddb":   "mariadb:latest", "mariabd":    "mariadb:latest",
+    "mairadb":    "mariadb:latest", "mariabdb":   "mariadb:latest",
+
+    # ── tomcat ────────────────────────────────────────────
+    "tmmcat":     "tomcat:latest", "tomccat":    "tomcat:latest",
+    "tomact":     "tomcat:latest", "tomcatt":    "tomcat:latest",
+    "tomcta":     "tomcat:latest", "tmcat":      "tomcat:latest",
+    "ttomcat":    "tomcat:latest",
+
+    # ── golang ────────────────────────────────────────────
+    "goland":     "golang:latest", "golng":      "golang:latest",
+    "glang":      "golang:latest", "golangn":    "golang:latest",
+    "golan":      "golang:latest", "golag":      "golang:latest",
+    "golangg":    "golang:latest",
+
+    # ── haproxy ───────────────────────────────────────────
+    "haproxuy":   "haproxy:latest", "haproxyy":  "haproxy:latest",
+    "haproxxy":   "haproxy:latest", "haprox":    "haproxy:latest",
+    "hapoxy":     "haproxy:latest", "harpoxy":   "haproxy:latest",
+
+    # ── traefik ───────────────────────────────────────────
+    "traeifk":    "traefik:latest", "traefki":   "traefik:latest",
+    "traefix":    "traefik:latest", "trafik":    "traefik:latest",
+    "traefkik":   "traefik:latest", "traefikk":  "traefik:latest",
+
+    # ── zookeeper ─────────────────────────────────────────
+    "zookeper":   "zookeeper:latest", "zookepeer": "zookeeper:latest",
+    "zooekeper":  "zookeeper:latest", "zokeeeper": "zookeeper:latest",
+    "zookeepr":   "zookeeper:latest",
+
+    # ── cassandra ─────────────────────────────────────────
+    "cassandara": "cassandra:latest", "casandra":  "cassandra:latest",
+    "cassadnra":  "cassandra:latest", "cassandr":  "cassandra:latest",
+    "casandara":  "cassandra:latest", "cassandrai":"cassandra:latest",
+}
+
+
+def fix_image(image: str) -> str:
+    """Correct common image name typos. Always strip whitespace first."""
+    image = image.strip()
+    base  = image.split(":")[0].lower().strip()
+    return IMAGE_FIXES.get(base, image)
+
+def make_deployment(name, image, replicas=1, port=80):
     return {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
+        "apiVersion": "apps/v1", "kind": "Deployment",
         "metadata": {"name": name},
         "spec": {
             "replicas": replicas,
@@ -98,392 +286,142 @@ def generate_deployment_yaml(name, image, replicas=1, port=80):
             "template": {
                 "metadata": {"labels": {"app": name}},
                 "spec": {
-                    "containers": [{
-                        "name": name,
-                        "image": image,
-                        "ports": [{"containerPort": port}]
-                    }]
+                    "containers": [
+                        {
+                            "name": name,
+                            "image": image,
+                            "ports": [{"containerPort": port}],
+                            "resources": {
+                                "requests": {"cpu": "100m", "memory": "128Mi"},
+                                "limits": {"cpu": "500m", "memory": "512Mi"}
+                            }
+                        }
+                    ]
                 }
             }
         }
     }
 
-def generate_service_yaml(name, port=80, service_type="NodePort"):
+def make_service(name, port=80, svc_type="NodePort"):
     return {
-        "apiVersion": "v1",
-        "kind": "Service",
+        "apiVersion": "v1", "kind": "Service",
         "metadata": {"name": f"{name}-service"},
         "spec": {
             "selector": {"app": name},
             "ports": [{"port": port, "targetPort": port}],
-            "type": service_type
+            "type": svc_type
         }
     }
 
-def generate_hpa_yaml(name, cpu_threshold=70):
+def make_hpa(name, threshold=70, min_replicas=1):
     return {
-        "apiVersion": "autoscaling/v2",
-        "kind": "HorizontalPodAutoscaler",
+        "apiVersion": "autoscaling/v2", "kind": "HorizontalPodAutoscaler",
         "metadata": {"name": f"{name}-hpa"},
         "spec": {
-            "scaleTargetRef": {
-                "apiVersion": "apps/v1",
-                "kind": "Deployment",
-                "name": name
-            },
-            "minReplicas": 1,
-            "maxReplicas": 10,
-            "metrics": [{
-                "type": "Resource",
-                "resource": {
-                    "name": "cpu",
-                    "target": {
-                        "type": "Utilization",
-                        "averageUtilization": cpu_threshold
-                    }
-                }
-            }]
+            "scaleTargetRef": {"apiVersion": "apps/v1", "kind": "Deployment", "name": name},
+            "minReplicas": min_replicas,
+            "maxReplicas": max(10, min_replicas + 5),
+            "metrics": [{"type": "Resource", "resource": {"name": "cpu", "target": {"type": "Utilization", "averageUtilization": threshold}}}]
         }
     }
 
-def generate_secret_yaml(name, data):
-    encoded = {k: base64.b64encode(v.encode()).decode() for k, v in data.items()}
+def make_secret(name, data: dict):
     return {
-        "apiVersion": "v1",
-        "kind": "Secret",
+        "apiVersion": "v1", "kind": "Secret",
         "metadata": {"name": f"{name}-secret"},
         "type": "Opaque",
-        "data": encoded
+        "data": {k: base64.b64encode(v.encode()).decode() for k, v in data.items()}
     }
 
-def generate_postgres_deployment_yaml():
-    return {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "postgres"},
-        "spec": {
-            "replicas": 1,
-            "selector": {"matchLabels": {"app": "postgres"}},
-            "template": {
-                "metadata": {"labels": {"app": "postgres"}},
-                "spec": {
-                    "containers": [{
-                        "name": "postgres",
-                        "image": "postgres:latest",
-                        "ports": [{"containerPort": 5432}],
-                        "env": [
-                            {
-                                "name": "POSTGRES_PASSWORD",
-                                "valueFrom": {
-                                    "secretKeyRef": {
-                                        "name": "postgres-secret",
-                                        "key": "password"
-                                    }
-                                }
-                            },
-                            {
-                                "name": "POSTGRES_DB",
-                                "value": "appdb"
-                            }
-                        ]
-                    }]
-                }
-            }
-        }
-    }
-
-def generate_mysql_deployment_yaml():
-    return {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "mysql"},
-        "spec": {
-            "replicas": 1,
-            "selector": {"matchLabels": {"app": "mysql"}},
-            "template": {
-                "metadata": {"labels": {"app": "mysql"}},
-                "spec": {
-                    "containers": [{
-                        "name": "mysql",
-                        "image": "mysql:latest",
-                        "ports": [{"containerPort": 3306}],
-                        "env": [
-                            {
-                                "name": "MYSQL_ROOT_PASSWORD",
-                                "valueFrom": {
-                                    "secretKeyRef": {
-                                        "name": "mysql-secret",
-                                        "key": "password"
-                                    }
-                                }
-                            },
-                            {
-                                "name": "MYSQL_DATABASE",
-                                "value": "appdb"
-                            }
-                        ]
-                    }]
-                }
-            }
-        }
-    }
-
-# ── Apply manifest to cluster ──────────────────────────
-
-def apply_manifest(manifest):
+def apply_manifest(manifest: dict) -> dict:
     kind = manifest.get("kind")
     name = manifest.get("metadata", {}).get("name")
-    namespace = manifest.get("metadata", {}).get("namespace", "default")
-
+    ns   = manifest.get("metadata", {}).get("namespace", "default")
     try:
         if kind == "Deployment":
-            api = client.AppsV1Api()
-            api.create_namespaced_deployment(namespace=namespace, body=manifest)
+            client.AppsV1Api().create_namespaced_deployment(ns, manifest)
         elif kind == "Service":
-            api = client.CoreV1Api()
-            api.create_namespaced_service(namespace=namespace, body=manifest)
-        elif kind == "ConfigMap":
-            api = client.CoreV1Api()
-            api.create_namespaced_config_map(namespace=namespace, body=manifest)
+            client.CoreV1Api().create_namespaced_service(ns, manifest)
         elif kind == "Secret":
-            api = client.CoreV1Api()
-            api.create_namespaced_secret(namespace=namespace, body=manifest)
+            client.CoreV1Api().create_namespaced_secret(ns, manifest)
         elif kind == "HorizontalPodAutoscaler":
-            api = client.AutoscalingV2Api()
-            api.create_namespaced_horizontal_pod_autoscaler(namespace=namespace, body=manifest)
-        elif kind == "ServiceAccount":
-            api = client.CoreV1Api()
-            api.create_namespaced_service_account(namespace=namespace, body=manifest)
+            client.AutoscalingV2Api().create_namespaced_horizontal_pod_autoscaler(ns, manifest)
         else:
-            return {"kind": kind, "name": name, "status": "skipped - unsupported kind"}
-
+            return {"kind": kind, "name": name, "status": "skipped"}
         return {"kind": kind, "name": name, "status": "created"}
-
     except Exception as e:
-        return {"kind": kind, "name": name, "status": f"error: {str(e)}"}
+        return {"kind": kind, "name": name, "status": f"error: {e}"}
 
-# ── Common image typo corrections ──────────────────────
+# ── Self-Healing ────────────────────────────────────────
+watch_store: dict = {}
 
-IMAGE_CORRECTIONS = {
-    "ngix": "nginx:latest",
-    "ngnix": "nginx:latest",
-    "niginx": "nginx:latest",
-    "nginix": "nginx:latest",
-    "nginx": "nginx:latest",
-    "postgress": "postgres:latest",
-    "postgresl": "postgres:latest",
-    "reddis": "redis:latest",
-    "rediss": "redis:latest",
-    "apche": "apache:latest",
-    "appache": "apache:latest",
-    "monogo": "mongo:latest",
-    "monggo": "mongo:latest",
-    "msql": "mysql:latest",
-    "mysqll": "mysql:latest",
-}
-
-def correct_image_typo(image_name):
-    base = image_name.split(":")[0].lower()
-    if base in IMAGE_CORRECTIONS:
-        return IMAGE_CORRECTIONS[base], True
-    return image_name, False
-
-# ── AI Self Healing ────────────────────────────────────
-
-def analyze_and_fix_pod(pod_name, deployment_name, original_image, namespace="default"):
-    v1 = client.CoreV1Api()
-    apps_v1 = client.AppsV1Api()
-
+def _heal_pod(pod_name, deployment_name, image, namespace):
+    """Detect and fix a bad image on a deployment."""
+    apps = client.AppsV1Api()
     try:
-        events = v1.list_namespaced_event(
-            namespace=namespace,
-            field_selector=f"involvedObject.name={pod_name}"
-        )
-        event_messages = [e.message for e in events.items if e.message]
-    except:
-        event_messages = []
+        # Always read the REAL current image from the cluster
+        dep = apps.read_namespaced_deployment(deployment_name, namespace)
+        current_image = dep.spec.template.spec.containers[0].image.strip()
+        fixed = fix_image(current_image)
 
-    try:
-        logs = v1.read_namespaced_pod_log(
-            name=pod_name,
-            namespace=namespace,
-            tail_lines=20
-        )
-    except:
-        logs = "No logs available"
+        if fixed != current_image:
+            print(f"[HEAL] Fixing {deployment_name}: '{current_image}' → '{fixed}'")
+            dep.spec.template.spec.containers[0].image = fixed
+            apps.patch_namespaced_deployment(deployment_name, namespace, dep)
+            SELF_HEALS_TOTAL.inc()
+            send_discord("🔧 AI Self-Heal", f"Fixed `{deployment_name}`: `{current_image}` → `{fixed}`")
+            return fixed
+        else:
+            print(f"[HEAL] No fix needed for '{current_image}' on {deployment_name}")
+            return None
+    except Exception as e:
+        print(f"[HEAL ERROR] {deployment_name}: {e}")
+        return None
 
-    # First try hardcoded typo correction
-    corrected_image, was_typo = correct_image_typo(original_image)
-
-    if was_typo:
-        analysis = {
-            "root_cause": f"Typo in image name: '{original_image}' does not exist",
-            "is_auto_fixable": True,
-            "fix_type": "image_correction",
-            "fix_value": corrected_image,
-            "message": f"Image '{original_image}' appears to be a typo. Auto correcting to '{corrected_image}'",
-            "auto_fixed": False
-        }
-    else:
-        start_time = time.time()
-        analysis_prompt = f"""A Kubernetes pod has an ImagePullBackOff error.
-
-Requested image: {original_image}
-Error events: {json.dumps(event_messages)}
-
-This is likely a typo in the image name. Common corrections:
-- ngix -> nginx
-- ngnix -> nginx
-- postgress -> postgres
-- reddis -> redis
-
-Respond ONLY in this exact JSON format:
-{{
-  "root_cause": "one sentence explanation",
-  "is_auto_fixable": true or false,
-  "fix_type": "image_correction or none",
-  "fix_value": "corrected docker image name with :latest tag or empty string",
-  "message": "human readable explanation"
-}}"""
-
-        response = requests.post(
-            f"{OLLAMA_HOST}/api/generate",
-            json={
-                "model": OLLAMA_MODEL,
-                "system": "You are a Kubernetes debugging expert. Always respond with valid JSON only. No markdown.",
-                "prompt": analysis_prompt,
-                "stream": False
-            }
-        )
-        OLLAMA_LATENCY.observe(time.time() - start_time)
-
-        raw = response.json().get("response", "").strip()
-        if raw.startswith("```"):
-            raw = "\n".join(raw.split("\n")[1:])
-        if raw.endswith("```"):
-            raw = "\n".join(raw.split("\n")[:-1])
-        raw = raw.strip()
-
-        try:
-            analysis = json.loads(raw)
-            analysis["auto_fixed"] = False
-        except:
-            analysis = {
-                "root_cause": "Could not analyze error",
-                "is_auto_fixable": False,
-                "fix_type": "none",
-                "fix_value": "",
-                "message": "AI could not determine the fix. Please check the image name manually.",
-                "auto_fixed": False
-            }
-
-    # Apply fix if possible
-    if analysis.get("is_auto_fixable") and analysis.get("fix_type") == "image_correction":
-        fix_value = analysis.get("fix_value", "")
-        if fix_value and " " not in fix_value:
-            try:
-                deployment = apps_v1.read_namespaced_deployment(
-                    name=deployment_name,
-                    namespace=namespace
-                )
-                deployment.spec.template.spec.containers[0].image = fix_value
-                apps_v1.patch_namespaced_deployment(
-                    name=deployment_name,
-                    namespace=namespace,
-                    body=deployment
-                )
-                analysis["auto_fixed"] = True
-                SELF_HEALS_TOTAL.inc()
-            except Exception as e:
-                analysis["auto_fixed"] = False
-                analysis["fix_error"] = str(e)
-
-    return analysis
-
-
-# Shared watch results store
-watch_store = {}
-
-def watch_pods_background(deployment_name, watch_id, original_image, namespace="default"):
+def _watch_bg(app_name, watch_id, image, namespace="default"):
     v1 = client.CoreV1Api()
     watch_store[watch_id] = {"status": "watching", "events": []}
 
-    max_attempts = 12
-    attempt = 0
-    fixed_pods = set()
+    def log(msg, etype="info"):
+        watch_store[watch_id]["events"].append({"type": etype, "message": msg})
 
-    while attempt < max_attempts:
+    fixed_pods: set = set()
+    for _ in range(12):  # 2 minutes max
         time.sleep(10)
-        attempt += 1
-
         try:
-            pods = v1.list_namespaced_pod(
-                namespace=namespace,
-                label_selector=f"app={deployment_name}"
-            )
-        except:
-            break
-
-        all_running = True
-
-        for pod in pods.items:
-            pod_name = pod.metadata.name
-            container_statuses = pod.status.container_statuses or []
-
-            for cs in container_statuses:
-                waiting = cs.state.waiting
-                if waiting and pod_name not in fixed_pods:
-                    reason = waiting.reason
-                    all_running = False
-
-                    if reason in ["ImagePullBackOff", "ErrImagePull"]:
-                        watch_store[watch_id]["events"].append({
-                            "type": "error_detected",
-                            "pod": pod_name,
-                            "error": reason,
-                            "message": f"⚠️ {reason} detected on {pod_name}"
-                        })
-
-                        analysis = analyze_and_fix_pod(
-                            pod_name,
-                            deployment_name,
-                            original_image,
-                            namespace
+            pods = v1.list_namespaced_pod(namespace, label_selector=f"app={app_name}")
+            all_ok = True
+            for p in pods.items:
+                pname = p.metadata.name
+                for cs in (p.status.container_statuses or []):
+                    w = cs.state.waiting
+                    if w:
+                        all_ok = False
+                        reason = w.reason or ""
+                        # Handle ALL image-related failures
+                        BAD_IMAGE_REASONS = (
+                            "ImagePullBackOff",
+                            "ErrImagePull",
+                            "InvalidImageName",
+                            "ErrImageNeverPull",
                         )
-                        fixed_pods.add(pod_name)
-
-                        watch_store[watch_id]["events"].append({
-                            "type": "analysis",
-                            "pod": pod_name,
-                            "root_cause": analysis.get("root_cause"),
-                            "message": f"🤖 AI Analysis: {analysis.get('message')}",
-                            "auto_fixed": analysis.get("auto_fixed", False)
-                        })
-
-                        if analysis.get("auto_fixed"):
-                            watch_store[watch_id]["events"].append({
-                                "type": "fix_applied",
-                                "pod": pod_name,
-                                "message": f"🔧 Auto fixed image to: {analysis.get('fix_value')}"
-                            })
-                            send_discord_alert("🔧 AI Self-Heal Initiated", f"Pod: `{pod_name}`\nError: `ImagePullBackOff`\nFix Applied: Swapped image to `{analysis.get('fix_value')}`")
-                            send_email_alert("KubeNexus AI Self-Heal Event", f"Pod {pod_name} encountered an ImagePullBackOff error. KubeNexus correctly analyzed the issue and automatically applied a patch swamping the image to {analysis.get('fix_value')}.")
-
-                    elif reason == "CrashLoopBackOff":
-                        watch_store[watch_id]["events"].append({
-                            "type": "error_detected",
-                            "pod": pod_name,
-                            "error": reason,
-                            "message": f"⚠️ CrashLoopBackOff detected on {pod_name} — check application logs"
-                        })
-                        fixed_pods.add(pod_name)
-
-        if all_running and pods.items:
-            watch_store[watch_id]["events"].append({
-                "type": "success",
-                "message": "✅ All pods are running successfully"
-            })
-            watch_store[watch_id]["status"] = "complete"
+                        if reason in BAD_IMAGE_REASONS and pname not in fixed_pods:
+                            log(f"⚠️ {reason} on {pname} — AI analysing...", "error_detected")
+                            result = _heal_pod(pname, app_name, image, namespace)
+                            fixed_pods.add(pname)
+                            if result:
+                                log(f"🔧 Auto-fixed: image corrected to `{result}`", "fix_applied")
+                            else:
+                                log(f"⚠️ Could not auto-fix {pname} — image may be genuinely invalid", "error_detected")
+                        elif reason == "CrashLoopBackOff" and pname not in fixed_pods:
+                            log(f"⚠️ CrashLoopBackOff on {pname} — check logs", "error_detected")
+                            fixed_pods.add(pname)
+            if all_ok and pods.items:
+                log("✅ All pods running successfully!", "success")
+                watch_store[watch_id]["status"] = "complete"
+                return
+        except Exception as e:
+            log(f"Monitor error: {e}", "error_detected")
             break
 
     if watch_store[watch_id]["status"] == "watching":
@@ -495,125 +433,130 @@ class DeployRequest(BaseModel):
     request: str
 
 @app.get("/health")
+@app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "timestamp": time.time()}
 
 @app.post("/deploy")
+@app.post("/api/deploy")
 def deploy(body: DeployRequest):
     DEPLOYMENTS_TOTAL.inc()
 
-    # Step 1 - Use Ollama to extract intent as JSON
-    start_time = time.time()
-    intent_prompt = f"""I need you to fill in a JSON template based on a user request.
-
-User request: "{body.request}"
-
-Here is an example:
-User request: "deploy nginx with 3 replicas"
-Output:
-{{"app_name": "nginx", "image": "nginx:latest", "replicas": 3, "port": 80, "needs_database": false, "database_type": "", "cpu_threshold": 70, "needs_hpa": false}}
-
-Another example:
-User request: "deploy my app using myuser/myapp:v1 with postgres database and autoscale at 60 percent"
-Output:
-{{"app_name": "myapp", "image": "myuser/myapp:v1", "replicas": 1, "port": 80, "needs_database": true, "database_type": "postgres", "cpu_threshold": 60, "needs_hpa": true}}
-
-Now fill in the JSON for this request: "{body.request}"
-Output JSON only, nothing else:"""
-
-    response = requests.post(
-        f"{OLLAMA_HOST}/api/generate",
-        json={
-            "model": OLLAMA_MODEL,
-            "system": "You are a JSON extraction expert. Always respond with valid JSON only. No explanations. No markdown. No extra text.",
-            "prompt": intent_prompt,
-            "stream": False
-        },
-        timeout=60.0
+    # --- Parse intent with AI ---
+    intent = call_ollama(
+        system_prompt=(
+            "You are a JSON extraction expert. "
+            "Always respond with valid JSON only. No explanations, no markdown, no extra text."
+        ),
+        user_prompt=(
+            f"Extract the deployment intent from this user request: \"{body.request}\"\n\n"
+            "Return ONLY valid JSON, nothing else:\n"
+            "{\"app_name\": \"nginx\", \"image\": \"nginx:latest\", \"replicas\": 1, \"port\": 80, "
+            "\"needs_database\": false, \"database_type\": \"\", \"needs_hpa\": false, \"cpu_threshold\": 70}\n\n"
+            "Rules:\n"
+            "- app_name: the application name the user wants to deploy\n"
+            "- image: the docker image name from the request (e.g. 'ngix' becomes 'ngix:latest')\n"
+            "- needs_hpa: true if user mentions autoscale, autoscaling, hpa, scaling\n"
+            "- needs_database: true if user mentions postgres, mysql, redis, database\n"
+            "- database_type: 'postgres', 'mysql', or 'redis' if mentioned, else empty string\n"
+            "- cpu_threshold: the CPU percentage number if mentioned, else 70\n"
+            f"User request: \"{body.request}\""
+        ),
     )
-    OLLAMA_LATENCY.observe(time.time() - start_time)
 
-    raw = response.json().get("response", "").strip()
+    if not intent:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "AI could not parse your command. Try: 'deploy nginx with 3 replicas'"}
+        )
 
-    if raw.startswith("```"):
-        raw = "\n".join(raw.split("\n")[1:])
-    if raw.endswith("```"):
-        raw = "\n".join(raw.split("\n")[:-1])
-    raw = raw.strip()
+    app_name     = str(intent.get("app_name", "myapp")).lower().replace(" ", "-")
+    image        = fix_image(str(intent.get("image", "nginx:latest")))
+    replicas     = max(1, int(intent.get("replicas", 1)))
+    port         = int(intent.get("port", 80))
+    db_type      = str(intent.get("database_type", "")).lower().strip()
 
-    try:
-        intent = json.loads(raw)
-    except:
-        return {"error": "Could not understand the request. Please try again.", "raw": raw}
+    # Keyword fallbacks — small AI model often misses these
+    raw_lower    = body.request.lower()
+    needs_db     = bool(intent.get("needs_database", False)) or \
+                   db_type in ("postgres", "mysql", "redis") or \
+                   any(w in raw_lower for w in ("postgres", "mysql", "redis", "database", " db "))
+    needs_hpa    = bool(intent.get("needs_hpa", False)) or \
+                   any(w in raw_lower for w in ("autoscal", "hpa", "auto scale", "autoscale", "scaling", " scale"))
 
-    app_name = intent.get("app_name", "myapp")
-    image = intent.get("image", "nginx:latest")
-    replicas = int(intent.get("replicas", 1))
-    port = int(intent.get("port", 80))
-    database_type = intent.get("database_type", "")
-    cpu_threshold = int(intent.get("cpu_threshold", 70))
+    # Extract cpu_threshold from raw request if AI returned default 70
+    cpu_thresh = int(intent.get("cpu_threshold", 70))
+    if cpu_thresh == 70:  # AI returned default — try to parse from raw request
+        import re
+        m = re.search(r'(\d+)\s*%?\s*cpu', raw_lower)
+        if not m:
+            m = re.search(r'cpu\s*(\d+)', raw_lower)
+        if m:
+            cpu_thresh = int(m.group(1))
 
-    needs_database = intent.get("needs_database", False) or (database_type in ["postgres", "mysql", "redis"])
-    needs_hpa = intent.get("needs_hpa", False) or any(word in body.request.lower() for word in ["autoscale", "hpa", "auto scale", "scaling", "scale"])
-
-    # Build manifests
-    manifests = []
-    manifests.append(generate_deployment_yaml(app_name, image, replicas, port))
-    manifests.append(generate_service_yaml(app_name, port))
-
+    # --- Build manifests ---
+    manifests = [
+        make_deployment(app_name, image, replicas, port),
+        make_service(app_name, port),
+    ]
     if needs_hpa:
-        manifests.append(generate_hpa_yaml(app_name, cpu_threshold))
+        manifests.append(make_hpa(app_name, cpu_thresh, min_replicas=replicas))
+    if needs_db:
+        if db_type == "postgres":
+            pg_deploy = make_deployment("postgres", "postgres:latest", 1, 5432)
+            pg_deploy["spec"]["template"]["spec"]["containers"][0]["env"] = [
+                {"name": "POSTGRES_PASSWORD", "value": "postgres123"},
+                {"name": "POSTGRES_DB",       "value": "appdb"},
+            ]
+            manifests += [
+                make_secret("postgres", {
+                    "password": "postgres123",
+                    "database-url": "postgresql://postgres:postgres123@postgres-service:5432/appdb"
+                }),
+                pg_deploy,
+                make_service("postgres", 5432, "ClusterIP"),
+            ]
+        elif db_type == "mysql":
+            mysql_deploy = make_deployment("mysql", "mysql:latest", 1, 3306)
+            mysql_deploy["spec"]["template"]["spec"]["containers"][0]["env"] = [
+                {"name": "MYSQL_ROOT_PASSWORD", "value": "mysql123"},
+                {"name": "MYSQL_DATABASE",       "value": "appdb"},
+            ]
+            manifests += [
+                make_secret("mysql", {"password": "mysql123"}),
+                mysql_deploy,
+                make_service("mysql", 3306, "ClusterIP"),
+            ]
+        elif db_type == "redis":
+            manifests += [
+                make_deployment("redis", "redis:latest", 1, 6379),
+                make_service("redis", 6379, "ClusterIP"),
+            ]
 
-    if needs_database:
-        if database_type == "postgres":
-            manifests.append(generate_secret_yaml("postgres", {
-                "password": "postgres123",
-                "database-url": "postgresql://postgres:postgres123@postgres-service:5432/appdb"
-            }))
-            manifests.append(generate_postgres_deployment_yaml())
-            manifests.append(generate_service_yaml("postgres", 5432, "ClusterIP"))
-        elif database_type == "redis":
-            manifests.append(generate_deployment_yaml("redis", "redis:latest", 1, 6379))
-            manifests.append(generate_service_yaml("redis", 6379, "ClusterIP"))
-        elif database_type == "mysql":
-            manifests.append(generate_secret_yaml("mysql", {
-                "password": "mysql123"
-            }))
-            manifests.append(generate_mysql_deployment_yaml())
-            manifests.append(generate_service_yaml("mysql", 3306, "ClusterIP"))
+    # --- Apply ---
+    deployed = [apply_manifest(m) for m in manifests]
+    all_ok   = all("error" not in r["status"] for r in deployed)
 
-    # Apply all manifests
-    results = []
-    all_success = True
-    for manifest in manifests:
-        result = apply_manifest(manifest)
-        results.append(result)
-        if "error" in result["status"]:
-            all_success = False
-
-    if all_success:
+    if all_ok:
         DEPLOYMENTS_SUCCESS.inc()
-        send_discord_alert("✅ KubeNexus Successfully Deployed", f"App: `{app_name}`\nImage: `{image}`\nReplicas: `{replicas}`\nDatabase: `{database_type if database_type else 'None'}`\nAutoscaling: `{'Enabled' if needs_hpa else 'Disabled'}`")
-        send_email_alert("✅ KubeNexus New Manifest Deployed", f"KubeNexus successfully interpreted a voice command and applied an orchestration manifest mapping App: {app_name} | Image: {image} | Replicas: {replicas}.")
+        send_discord("🚀 KubeNexus Deployed",
+                     f"App: `{app_name}` | Image: `{image}` | Replicas: `{replicas}`")
+        send_email("✅ KubeNexus New Deployment",
+                   f"App {app_name} | Image {image} | Replicas {replicas}")
 
-    # Start background watcher
+    # --- Start background watcher ---
     watch_id = f"{app_name}-{int(time.time())}"
-    thread = threading.Thread(
-        target=watch_pods_background,
-        args=(app_name, watch_id, image),
-        daemon=True
-    )
-    thread.start()
+    threading.Thread(target=_watch_bg, args=(app_name, watch_id, image), daemon=True).start()
 
     return {
-        "status": "success",
-        "intent": intent,
-        "deployed": results,
-        "watch_id": watch_id
+        "status":    "initiated",
+        "watch_id":  watch_id,
+        "app_name":  app_name,
+        "intent":    {**intent, "app_name": app_name},   # ensure app_name key always present
+        "deployed":  deployed,                            # frontend reads `deployed`
     }
 
 @app.get("/watch/{watch_id}")
-def get_watch_status(watch_id: str):
-    if watch_id not in watch_store:
-        return {"status": "not_found", "events": []}
-    return watch_store[watch_id]
+@app.get("/api/watch/{watch_id}")
+def get_watch(watch_id: str):
+    return watch_store.get(watch_id, {"status": "not_found", "events": []})

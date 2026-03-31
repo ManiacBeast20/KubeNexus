@@ -22,6 +22,8 @@ spec:
       containers:
       - name: kubenexus-backend
         image: {{ .Values.backend.image }}:{{ .Values.backend.tag }}
+        command: ["python", "main.py"]
+        workingDir: /app
         env:
         - name: DISCORD_WEBHOOK_URL
           valueFrom:
@@ -60,14 +62,14 @@ spec:
             port: {{ .Values.backend.port }}
           initialDelaySeconds: 10
           periodSeconds: 5
-          failureThreshold: 6
+          failureThreshold: 12
         livenessProbe:
           httpGet:
             path: /health
             port: {{ .Values.backend.port }}
           initialDelaySeconds: 15
           periodSeconds: 10
-          failureThreshold: 6
+          failureThreshold: 12
       volumes:
       - name: backend-code
         configMap:

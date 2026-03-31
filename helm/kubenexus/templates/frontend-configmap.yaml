@@ -8,29 +8,20 @@ data:
     server {
         listen 80;
 
-        # Kubernetes internal DNS resolver
-        resolver 10.96.0.10 valid=30s;
-
         location / {
-            root /usr/share/nginx/html;
-            index index.html index.htm;
+            root   /usr/share/nginx/html;
+            index  index.html index.htm;
             try_files $uri $uri/ /index.html;
         }
 
-        # Proxy API requests to backend
         location /api/ {
-            # Use a variable with FQDN to force Nginx to resolve at runtime
-            set $backend_svc "http://kubenexus-backend-service.{{ .Values.namespace }}.svc.cluster.local:8000/";
-            proxy_pass $backend_svc;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }
-
-        # Health check
-        location /health {
-            return 200 'OK';
-            add_header Content-Type text/plain;
+            proxy_pass         http://kubenexus-backend-service.{{ .Values.namespace }}.svc.cluster.local:8000/api/;
+            proxy_http_version 1.1;
+            proxy_set_header   Host              $host;
+            proxy_set_header   X-Real-IP         $remote_addr;
+            proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header   X-Forwarded-Proto $scheme;
+            proxy_read_timeout 120s;
+            proxy_connect_timeout 10s;
         }
     }

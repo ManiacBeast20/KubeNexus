@@ -39,6 +39,8 @@ if (-not $monitoringExists) {
 }
 
 Write-Host 'Deploying KubeNexus Infrastructure...' -ForegroundColor Yellow
+# Ensure Helm chart uses the latest backend code from the backend/ directory
+Copy-Item "backend/main.py" "helm/kubenexus/main.py" -Force
 # Recursively fix all objects in the namespace to prevent ownership errors
 kubectl label namespace kubenexus app.kubernetes.io/managed-by=Helm --overwrite 2>$null | Out-Null
 kubectl annotate namespace kubenexus meta.helm.sh/release-name=kubenexus meta.helm.sh/release-namespace=kubenexus --overwrite 2>$null | Out-Null
@@ -61,7 +63,7 @@ Stop-Process -Name 'kubectl' -ErrorAction SilentlyContinue
 Start-Process powershell -WindowStyle Hidden -ArgumentList '-Command kubectl --namespace monitoring port-forward svc/monitoring-grafana 3000:80'
 Start-Process powershell -WindowStyle Hidden -ArgumentList '-Command kubectl --namespace kubenexus port-forward svc/kubenexus-frontend-service 8080:80'
 
-$frontendUrl = "http://localhost:8080"
+$dashUrl = "http://localhost:3000/d/kubenexus-dash-tactical/kubenexus-tactical-overview"
 
 Write-Host ""
 Write-Host @"
@@ -75,12 +77,12 @@ Write-Host @"
 Write-Host "                     ✨ IS NOW LIVE ✨" -ForegroundColor Green
 Write-Host "=======================================================" -ForegroundColor Green 
 Write-Host "🗣️ Frontend Web Interface  : $frontendUrl" -ForegroundColor Cyan
-Write-Host '📊 Grafana Dashboard       : http://localhost:3000' -ForegroundColor Cyan
+Write-Host "📊 Grafana Dashboard       : $dashUrl" -ForegroundColor Cyan
 Write-Host '   (Login credentials      : admin / kubenexus123)' -ForegroundColor DarkGray
 Write-Host '======================================================='
 Write-Host ''
 
 Write-Host 'Opening Grafana Dashboard...' -ForegroundColor Yellow
-Start-Process 'http://localhost:3000'
+Start-Process $dashUrl
 Write-Host 'Opening KubeNexus Frontend...' -ForegroundColor Yellow
 Start-Process $frontendUrl
