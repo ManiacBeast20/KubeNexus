@@ -3,13 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Histogram
-import httpx
+import requests
 import yaml
 import os
 import json
 import base64
 import time
-import asyncio
 import threading
 import smtplib
 from email.mime.text import MIMEText
@@ -58,15 +57,14 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
 MAIL_USERNAME = os.getenv("MAIL_USERNAME", "")
 MAIL_PASSWORD = os.getenv("MAIL_PASSWORD", "")
 
-async def send_discord_alert(title, description):
+def send_discord_alert(title, description):
     if not DISCORD_WEBHOOK_URL: return
     try:
-        async with httpx.AsyncClient() as client_http:
-            await client_http.post(DISCORD_WEBHOOK_URL, json={"content": f"**{title}**\n{description}"})
+        requests.post(DISCORD_WEBHOOK_URL, json={"content": f"**{title}**\n{description}"})
     except Exception as e:
         print(f"Discord error: {e}")
 
-async def send_email_alert(subject, body):
+def send_email_alert(subject, body):
     if not MAIL_USERNAME or not MAIL_PASSWORD: return
     try:
         msg = MIMEMultipart()
@@ -75,7 +73,6 @@ async def send_email_alert(subject, body):
         msg['Subject'] = subject
         msg.attach(MIMEText(body, 'plain'))
         
-        # SMTP remains sync as it's usually fast or run in a thread
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(MAIL_USERNAME, MAIL_PASSWORD)
             server.send_message(msg)
@@ -293,7 +290,7 @@ def correct_image_typo(image_name):
 
 # ── AI Self Healing ────────────────────────────────────
 
-async def analyze_and_fix_pod(pod_name, deployment_name, original_image, namespace="default"):
+def analyze_and_fix_pod(pod_name, deployment_name, original_image, namespace="default"):
     v1 = client.CoreV1Api()
     apps_v1 = client.AppsV1Api()
 
@@ -349,19 +346,18 @@ Respond ONLY in this exact JSON format:
   "message": "human readable explanation"
 }}"""
 
-        async with httpx.AsyncClient(timeout=60.0) as client_http:
-            response = await client_http.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "system": "You are a Kubernetes debugging expert. Always respond with valid JSON only. No markdown.",
-                    "prompt": analysis_prompt,
-                    "stream": False
-                }
-            )
-            OLLAMA_LATENCY.observe(time.time() - start_time)
-            raw = response.json()["response"].strip()
+        response = requests.post(
+            f"{OLLAMA_HOST}/api/generate",
+            json={
+                "model": OLLAMA_MODEL,
+                "system": "You are a Kubernetes debugging expert. Always respond with valid JSON only. No markdown.",
+                "prompt": analysis_prompt,
+                "stream": False
+            }
+        )
+        OLLAMA_LATENCY.observe(time.time() - start_time)
 
+        raw = response.json().get("response", "").strip()
         if raw.startswith("```"):
             raw = "\n".join(raw.split("\n")[1:])
         if raw.endswith("```"):
@@ -448,13 +444,12 @@ def watch_pods_background(deployment_name, watch_id, original_image, namespace="
                             "message": f"⚠️ {reason} detected on {pod_name}"
                         })
 
-                        # Run async fix logic in the background thread
-                        analysis = asyncio.run(analyze_and_fix_pod(
+                        analysis = analyze_and_fix_pod(
                             pod_name,
                             deployment_name,
                             original_image,
                             namespace
-                        ))
+                        )
                         fixed_pods.add(pod_name)
 
                         watch_store[watch_id]["events"].append({
@@ -471,8 +466,8 @@ def watch_pods_background(deployment_name, watch_id, original_image, namespace="
                                 "pod": pod_name,
                                 "message": f"🔧 Auto fixed image to: {analysis.get('fix_value')}"
                             })
-                            asyncio.run(send_discord_alert("🔧 AI Self-Heal Initiated", f"Pod: `{pod_name}`\nError: `ImagePullBackOff`\nFix Applied: Swapped image to `{analysis.get('fix_value')}`"))
-                            asyncio.run(send_email_alert("KubeNexus AI Self-Heal Event", f"Pod {pod_name} encountered an ImagePullBackOff error. KubeNexus correctly analyzed the issue and automatically applied a patch swamping the image to {analysis.get('fix_value')}."))
+                            send_discord_alert("🔧 AI Self-Heal Initiated", f"Pod: `{pod_name}`\nError: `ImagePullBackOff`\nFix Applied: Swapped image to `{analysis.get('fix_value')}`")
+                            send_email_alert("KubeNexus AI Self-Heal Event", f"Pod {pod_name} encountered an ImagePullBackOff error. KubeNexus correctly analyzed the issue and automatically applied a patch swamping the image to {analysis.get('fix_value')}.")
 
                     elif reason == "CrashLoopBackOff":
                         watch_store[watch_id]["events"].append({
@@ -500,11 +495,11 @@ class DeployRequest(BaseModel):
     request: str
 
 @app.get("/health")
-async def health():
+def health():
     return {"status": "ok"}
 
 @app.post("/deploy")
-async def deploy(body: DeployRequest):
+def deploy(body: DeployRequest):
     DEPLOYMENTS_TOTAL.inc()
 
     # Step 1 - Use Ollama to extract intent as JSON
@@ -526,21 +521,19 @@ Output:
 Now fill in the JSON for this request: "{body.request}"
 Output JSON only, nothing else:"""
 
-    async with httpx.AsyncClient(timeout=60.0) as client_http:
-        try:
-            response = await client_http.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "system": "You are a JSON extraction expert. Always respond with valid JSON only. No explanations. No markdown. No extra text.",
-                    "prompt": intent_prompt,
-                    "stream": False
-                }
-            )
-            OLLAMA_LATENCY.observe(time.time() - start_time)
-            raw = response.json().get("response", "").strip()
-        except Exception as e:
-             return {"error": f"Connection to AI failed: {str(e)}"}
+    response = requests.post(
+        f"{OLLAMA_HOST}/api/generate",
+        json={
+            "model": OLLAMA_MODEL,
+            "system": "You are a JSON extraction expert. Always respond with valid JSON only. No explanations. No markdown. No extra text.",
+            "prompt": intent_prompt,
+            "stream": False
+        },
+        timeout=60.0
+    )
+    OLLAMA_LATENCY.observe(time.time() - start_time)
+
+    raw = response.json().get("response", "").strip()
 
     if raw.startswith("```"):
         raw = "\n".join(raw.split("\n")[1:])
@@ -600,8 +593,8 @@ Output JSON only, nothing else:"""
 
     if all_success:
         DEPLOYMENTS_SUCCESS.inc()
-        await send_discord_alert("✅ KubeNexus Successfully Deployed", f"App: `{app_name}`\nImage: `{image}`\nReplicas: `{replicas}`\nDatabase: `{database_type if database_type else 'None'}`\nAutoscaling: `{'Enabled' if needs_hpa else 'Disabled'}`")
-        await send_email_alert("✅ KubeNexus New Manifest Deployed", f"KubeNexus successfully interpreted a voice command and applied an orchestration manifest mapping App: {app_name} | Image: {image} | Replicas: {replicas}.")
+        send_discord_alert("✅ KubeNexus Successfully Deployed", f"App: `{app_name}`\nImage: `{image}`\nReplicas: `{replicas}`\nDatabase: `{database_type if database_type else 'None'}`\nAutoscaling: `{'Enabled' if needs_hpa else 'Disabled'}`")
+        send_email_alert("✅ KubeNexus New Manifest Deployed", f"KubeNexus successfully interpreted a voice command and applied an orchestration manifest mapping App: {app_name} | Image: {image} | Replicas: {replicas}.")
 
     # Start background watcher
     watch_id = f"{app_name}-{int(time.time())}"
@@ -619,9 +612,8 @@ Output JSON only, nothing else:"""
         "watch_id": watch_id
     }
 
-
 @app.get("/watch/{watch_id}")
-async def get_watch_status(watch_id: str):
+def get_watch_status(watch_id: str):
     if watch_id not in watch_store:
         return {"status": "not_found", "events": []}
-    return watch_store[watch_id]
+    return watch_store[watch_id]
