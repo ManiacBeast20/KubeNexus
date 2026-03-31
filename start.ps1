@@ -35,7 +35,7 @@ if (-not $monitoringExists) {
     Write-Host 'Installing Prometheus & Grafana Analytics Stack (this may take a minute)...' -ForegroundColor Yellow
     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     helm repo update
-    helm install monitoring prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace --wait
+    helm install monitoring prometheus-community/kube-prometheus-stack --namespace monitoring --create-namespace --set grafana.adminPassword=kubenexus123 --wait
 }
 
 Write-Host 'Deploying KubeNexus Infrastructure...' -ForegroundColor Yellow
@@ -76,7 +76,7 @@ Write-Host "                     ✨ IS NOW LIVE ✨" -ForegroundColor Green
 Write-Host "=======================================================" -ForegroundColor Green 
 Write-Host "🗣️ Frontend Web Interface  : $frontendUrl" -ForegroundColor Cyan
 Write-Host '📊 Grafana Dashboard       : http://localhost:3000' -ForegroundColor Cyan
-Write-Host '   (Login credentials      : admin / prom-operator)' -ForegroundColor DarkGray
+Write-Host '   (Login credentials      : admin / kubenexus123)' -ForegroundColor DarkGray
 Write-Host '======================================================='
 Write-Host ''
 
